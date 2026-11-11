@@ -102,7 +102,7 @@ export function DevelopmentPanel({ player }: { player: PlayerState }) {
         <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 mb-2">PlayStyles</p>
         {playStyles.length === 0 ? (
           <p className="text-xs text-slate-600">
-            No badges yet — raise any attribute to 80 to unlock a PlayStyle. World-class players (OVR 85+ / POT 90+) earn Plus versions.
+            Raise any attribute to 80 to unlock a PlayStyle. OVR 85+ or POT 90+ players earn Plus versions.
           </p>
         ) : (
           <div className="flex flex-wrap gap-1.5">
@@ -129,8 +129,8 @@ export function DevelopmentPanel({ player }: { player: PlayerState }) {
         )}
         {slotEff !== null && (
           <p className="text-[10px] text-slate-500 mt-1.5">
-            Playing at {getFormation(game.tactics.formationName).positions[lineupSlot]} — effective rating {slotEff}
-            {player.retrain ? " · retraining in progress" : ""}
+            Playing at {getFormation(game.tactics.formationName).positions[lineupSlot]}, effective rating {slotEff}
+            {player.retrain ? ", retraining in progress" : ""}
           </p>
         )}
       </section>
@@ -139,7 +139,7 @@ export function DevelopmentPanel({ player }: { player: PlayerState }) {
       {paths.length > 0 && (
         <section aria-label="Evolution path">
           <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 mb-2 flex items-center gap-1.5">
-            <GitBranch className="h-3.5 w-3.5" aria-hidden /> Evolution path — choose once, forever
+            <GitBranch className="h-3.5 w-3.5" aria-hidden /> Evolution path
           </p>
           <div className="space-y-1.5">
             {paths.map((path) => (
@@ -231,7 +231,7 @@ export function DevelopmentPanel({ player }: { player: PlayerState }) {
             </p>
             <Progress value={((player.retrain.totalWeeks - player.retrain.weeksLeft) / player.retrain.totalWeeks) * 100} className="mt-2 h-1.5" aria-label="Retraining progress" />
             <p className="text-[10px] text-slate-500 mt-1.5">
-              {player.retrain.totalWeeks - player.retrain.weeksLeft}/{player.retrain.totalWeeks} weeks · growth halved while learning the role
+              {player.retrain.totalWeeks - player.retrain.weeksLeft}/{player.retrain.totalWeeks} weeks, growth halved while learning
             </p>
           </div>
         ) : player.position === "GK" ? (

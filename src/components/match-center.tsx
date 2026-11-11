@@ -76,7 +76,7 @@ export function MatchCenter() {
           myGoals > oppGoals ? "border-emerald-500/40 bg-emerald-500/10" : myGoals === oppGoals ? "border-slate-700 bg-slate-800/40" : "border-rose-500/40 bg-rose-500/10",
         )}>
           <p className={cn("text-xs font-bold uppercase tracking-widest", myGoals > oppGoals ? "text-emerald-400" : myGoals === oppGoals ? "text-slate-400" : "text-rose-400")}>
-            Full Time — {outcome}
+            Full Time: {outcome}
           </p>
           <p className="mt-2 font-mono text-4xl font-black text-slate-50 tabular-nums">
             {myGoals} <span className="text-slate-600">-</span> {oppGoals}
@@ -128,7 +128,7 @@ export function MatchCenter() {
           {motmPlayer && motm && (
             <div className="mt-3 flex items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-2">
               <Award className="h-4 w-4 text-amber-400" aria-hidden />
-              <span className="text-xs text-amber-200">MOTM: <strong>{motmPlayer.name}</strong> — rating <span className={ratingColor(motm.rating)}>{motm.rating.toFixed(1)}</span></span>
+              <span className="text-xs text-amber-200">MOTM: <strong>{motmPlayer.name}</strong> <span className={ratingColor(motm.rating)}>{motm.rating.toFixed(1)}</span></span>
             </div>
           )}
         </div>
@@ -264,7 +264,7 @@ export function MatchCenter() {
             aria-label="Kick off match"
           >
             <Play className="h-5 w-5 mr-2 fill-slate-950" aria-hidden />
-            Kick Off — Live Simulation
+            Kick Off
           </Button>
           {squadInjuries > 0 && (
             <p className="mt-2 text-center text-[11px] text-amber-400">{squadInjuries} injured player{squadInjuries > 1 ? "s" : ""} unavailable</p>
@@ -272,7 +272,7 @@ export function MatchCenter() {
         </div>
       ) : (
         <div className="rounded-xl border border-slate-800 bg-slate-900 p-4 text-center">
-          <p className="text-sm text-slate-400">No fixtures remaining — finish the season processing.</p>
+          <p className="text-sm text-slate-400">No fixtures remaining.</p>
         </div>
       )}
     </section>

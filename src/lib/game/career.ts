@@ -151,7 +151,7 @@ export function runTransferWorld(game: GameState, dataset: Dataset, rng: () => n
       tag: press[1],
       tone: window.deadline ? "news" : "neutral",
       text: window.deadline
-        ? `BREAKING: ${buyer.shortName} hijack the deal — ${target.name} signs for $${(fee / 1e6).toFixed(1)}M with minutes to spare!`
+        ? `BREAKING: ${buyer.shortName} hijack the deal! ${target.name} signs for $${(fee / 1e6).toFixed(1)}M with minutes to spare!`
         : `Done deal: ${target.name} (${target.overallRating} OVR) to ${buyer.shortName}. Smart business? Time will tell.`,
     });
   }
@@ -261,7 +261,7 @@ export function resolveInboxMessage(
     if (p) {
       if (optionId === "promise") {
         p.morale = Math.min(100, p.morale + 12);
-        msg.outcome = "Promised minutes — deliver or morale will crash";
+        msg.outcome = "Promised minutes. Deliver or morale will crash";
       } else {
         p.morale = Math.max(5, p.morale - 6);
         msg.outcome = "Told to fight for his place";
@@ -285,11 +285,11 @@ export function resolveInboxMessage(
           pushNews(game, "finance", `${p.name} signs new contract`, `Improved terms worth $${(p.salary / 1000).toFixed(1)}K per week keep him at the club until ${game.season + p.contractYears}.`);
         } else {
           p.morale = Math.max(5, p.morale - 8);
-          msg.outcome = "Budget too tight — talks collapsed";
+          msg.outcome = "Budget too tight, talks collapsed";
         }
       } else {
         p.morale = Math.max(5, p.morale - 10);
-        msg.outcome = "Contract talks shelved — player unimpressed";
+        msg.outcome = "Contract talks shelved, player unimpressed";
       }
     }
     return { ok: true, outcome: msg.outcome ?? "Done" };
@@ -309,7 +309,7 @@ export function applyBoardResult(game: GameState, won: boolean, drew: boolean, i
   if (isDerby && !won && !drew) delta -= 1;
   game.boardConfidence = Math.max(0, Math.min(100, game.boardConfidence + delta));
   if (game.boardConfidence < 22 && Math.random() < 0.5) {
-    pushNews(game, "board", "Board issues a warning", "The directors have publicly backed you — for now. Results must improve immediately.");
+    pushNews(game, "board", "Board issues a warning", "The directors publicly backed you for now. Results must improve immediately.");
   }
 }
 

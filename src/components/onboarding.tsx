@@ -58,19 +58,19 @@ export function OnboardingScreen() {
             </div>
             <div>
               <h1 className="text-2xl font-black tracking-tight text-slate-50">
-                QUATTRICK <span className="text-emerald-400">FM</span>
+                QUATTRICK
               </h1>
-              <p className="text-xs text-slate-400">Football Manager PWA · v4.0 Master Edition</p>
+              <p className="text-xs text-slate-400">Football Manager</p>
             </div>
           </div>
           <div className="mt-4 flex items-center gap-2 text-xs">
             {cloudOnline === false ? (
               <Badge variant="outline" className="gap-1 border-slate-700 text-slate-400">
-                <CloudOff className="h-3 w-3" aria-hidden /> Offline — showing cached data
+                <CloudOff className="h-3 w-3" aria-hidden /> Offline mode
               </Badge>
             ) : (
               <Badge variant="outline" className="gap-1 border-emerald-500/30 text-emerald-400">
-                <Cloud className="h-3 w-3" aria-hidden /> Cloud connected — synced on every device
+                <Cloud className="h-3 w-3" aria-hidden /> Cloud connected
               </Badge>
             )}
             <Badge variant="outline" className="border-slate-700 text-slate-400">
@@ -101,7 +101,7 @@ export function OnboardingScreen() {
                         aria-label={`Continue career ${s.saveName}`}
                       >
                         <p className="text-sm font-semibold text-slate-100 truncate">{s.saveName}</p>
-                        <p className="text-xs text-slate-500">{formatDate(typeof s.currentDate === "string" ? s.currentDate.slice(0, 10) : String(s.currentDate))} · tap to continue</p>
+                        <p className="text-xs text-slate-500">{formatDate(typeof s.currentDate === "string" ? s.currentDate.slice(0, 10) : String(s.currentDate))}, tap to continue</p>
                       </button>
                       <Button
                         variant="ghost"
@@ -202,10 +202,6 @@ export function OnboardingScreen() {
                 <Play className="h-5 w-5 mr-2" aria-hidden />
                 {starting ? "Setting up squad..." : "Start Career"}
               </Button>
-              <p className="text-[11px] text-slate-600 mt-3 flex items-center justify-center gap-1.5 text-center">
-                <Cloud className="h-3 w-3" aria-hidden />
-                Full online — careers and database live in Neon, identical on every device
-              </p>
             </div>
           </div>
         </div>

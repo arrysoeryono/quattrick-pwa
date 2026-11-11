@@ -16,15 +16,14 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "Quattrick Football Manager",
-  description:
-    "Offline-first football management PWA — squad, tactics, live matches, Excel database import/export and cloud saves.",
-  applicationName: "Quattrick FM",
+  description: "Squad, tactics, live matches, Excel database import and export.",
+  applicationName: "Quattrick Football Manager",
   manifest: "/manifest.webmanifest",
-  keywords: ["football manager", "PWA", "Quattrick", "tactics", "match engine"],
+  keywords: ["football manager", "Quattrick", "tactics", "match engine"],
   appleWebApp: {
     capable: true,
     statusBarStyle: "black-translucent",
-    title: "Quattrick FM",
+    title: "Quattrick Football Manager",
   },
   icons: {
     icon: [

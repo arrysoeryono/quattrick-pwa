@@ -371,10 +371,10 @@ export function TacticsTab() {
             <>
               <DialogHeader className="px-4 pt-4 pb-2">
                 <DialogTitle>
-                  {formation.positions[selectedSlot]} — slot {selectedSlot + 1}
+                  {formation.positions[selectedSlot]}, slot {selectedSlot + 1}
                 </DialogTitle>
                 <DialogDescription>
-                  {slotPlayer(selectedSlot) ? slotPlayer(selectedSlot)!.name : "Empty slot"} · assign or set instructions
+                  {slotPlayer(selectedSlot) ? slotPlayer(selectedSlot)!.name : "Empty slot"}, assign or set instructions
                 </DialogDescription>
               </DialogHeader>
               <Tabs defaultValue="assign" className="px-4 pb-4">

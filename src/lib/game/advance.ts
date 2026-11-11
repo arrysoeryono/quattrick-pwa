@@ -280,9 +280,9 @@ function endSeason(game: GameState, dataset: Dataset): { summary: NonNullable<Ad
     trophies,
   });
 
-  pushNews(game, "award", `Season ${game.season} complete — finished ${position}${position === 1 ? "st" : position === 2 ? "nd" : position === 3 ? "rd" : "th"}`,
+  pushNews(game, "award", `Season ${game.season} complete, finished ${position}${position === 1 ? "st" : position === 2 ? "nd" : position === 3 ? "rd" : "th"}`,
     `Record: ${row.won}W ${row.drawn}D ${row.lost}L, ${row.gf}:${row.ga}. Prize money: $${(prize / 1e6).toFixed(2)}M.`);
-  pushNews(game, "season", achieved ? "Board delighted — objective achieved" : "Board disappointed — objective missed",
+  pushNews(game, "season", achieved ? "Board delighted, objective achieved" : "Board disappointed, objective missed",
     achieved
       ? `Target was top ${game.seasonObjective.targetPosition}; you delivered position ${position}.`
       : `Target was top ${game.seasonObjective.targetPosition}; you finished ${position}. Expect higher expectations next season.`);
@@ -306,7 +306,7 @@ function endSeason(game: GameState, dataset: Dataset): { summary: NonNullable<Ad
         `Scouts report ${rec.reason}. Potential now ${p.potential}.`);
     }
     if (p.devPath && p.overallRating >= p.potential - 1) {
-      pushNews(game, "season", `${p.name} completes his ${p.devPath.replace("-", " ")} evolution`, "The archetype path is maxed out — a fully realised player.");
+      pushNews(game, "season", `${p.name} completes his ${p.devPath.replace("-", " ")} evolution`, "The archetype path is maxed out.");
     }
   }
 
@@ -384,7 +384,7 @@ function endSeason(game: GameState, dataset: Dataset): { summary: NonNullable<Ad
   const intake = academyIntake(game, dataset, nextId, rng);
   for (const y of intake) {
     pushNews(game, "season", `Academy intake: ${y.name} signs first pro deal`, `The ${y.age}-year-old ${y.position} (OVR ${y.ovr}, POT ${y.pot}) graduates from the youth academy. Facility level ${game.facilityLevel}.`);
-    pushSocial(game, { handle: "Academy Watch", tag: "@academywatch", tone: "news", text: `${y.name} is the standout of this year's intake — POT ${y.pot} at ${y.age} years old. One to watch.` });
+    pushSocial(game, { handle: "Academy Watch", tag: "@academywatch", tone: "news", text: `${y.name} is the standout of this year's intake. POT ${y.pot} at ${y.age} years old.` });
     if (y.pot >= 88) unlockAchievement(game, "wonderkid-signing");
   }
 
@@ -446,7 +446,7 @@ export function advanceAfterUserMatch(
   if (isCup && fx && drew) {
     // winner resolved in progressCup via cupWinner(); note the drama
     const opponent = userHome ? fx.awayId : fx.homeId;
-    pushNews(game, "cup", `Shootout drama vs ${teamName(dataset, opponent)}`, `Level after extra-time chaos — the tie is settled from the spot.`);
+    pushNews(game, "cup", `Shootout drama vs ${teamName(dataset, opponent)}`, `Level after extra time, settled from the spot.`);
   }
 
   /* 1c. board reaction + streaks + achievements */
@@ -581,7 +581,7 @@ export function advanceAfterUserMatch(
     p.stamina = Math.min(100, (p.stamina ?? 100) + 14 + train.staminaDelta);
     if (train.injury && p.injuryWeeks === 0) {
       p.injuryWeeks = 1;
-      pushNews(game, "injury", `${p.name} injured in training`, "An intense gym session ended with a knock — one week on the sidelines.");
+      pushNews(game, "injury", `${p.name} injured in training`, "An intense gym session ended with a knock. One week on the sidelines.");
     }
     if (p.retrain) {
       const done = tickRetrain(p);
@@ -608,7 +608,7 @@ export function advanceAfterUserMatch(
   const revealed = tickScouting(game);
   for (const pid of revealed) {
     const rp = dataset.players.find((x) => x.id === pid);
-    if (rp) pushNews(game, "transfer", `Scout report: ${rp.name}`, `Full dossier compiled — ${rp.age}-year-old ${rp.position}, OVR ${rp.overallRating}, POT ${rp.potential}. Now on the transfer list.`);
+    if (rp) pushNews(game, "transfer", `Scout report: ${rp.name}`, `Full dossier compiled. ${rp.age}-year-old ${rp.position}, OVR ${rp.overallRating}, POT ${rp.potential}. Now on the transfer list.`);
   }
 
   /* 6. matchday income */

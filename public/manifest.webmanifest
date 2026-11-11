@@ -1,7 +1,7 @@
 {
   "name": "Quattrick Football Manager",
-  "short_name": "Quattrick FM",
-  "description": "Offline-first football management PWA — squad, tactics, live match simulation, Excel database import/export and Neon cloud saves.",
+  "short_name": "Quattrick",
+  "description": "Squad, tactics, live match simulation, Excel database import and export.",
   "id": "/",
   "start_url": "/",
   "scope": "/",

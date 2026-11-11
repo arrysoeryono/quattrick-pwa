@@ -115,7 +115,7 @@ export function HomeTab() {
           <div className={cn("h-full rounded-full transition-all duration-500", confTone)} style={{ width: `${confidence}%` }} />
         </div>
         <div className="mt-1.5 flex justify-between text-[10px] text-slate-500">
-          <span>{confidence >= 70 ? "The board loves you" : confidence >= 45 ? "Steady — keep winning" : confidence >= 25 ? "Under pressure" : "Sack talk in the press..."}</span>
+          <span>{confidence >= 70 ? "The board loves you" : confidence >= 45 ? "Keep winning" : confidence >= 25 ? "Under pressure" : "Sack talk in the press..."}</span>
           <span>Manager rep {game.managerRep ?? 40}</span>
         </div>
       </section>
@@ -144,7 +144,7 @@ export function HomeTab() {
                           : "border-slate-700 text-slate-300",
                       )}
                       onClick={() => answer(m.id, o.id)}
-                      aria-label={`${o.label} — ${m.title}`}
+                      aria-label={`${o.label}: ${m.title}`}
                     >
                       {o.label}
                     </Button>
@@ -229,7 +229,7 @@ export function HomeTab() {
           {game.news.slice(0, 6).map((n) => (
             <NewsRow key={n.id} item={n} onOpen={setOpenNews} />
           ))}
-          {game.news.length === 0 && <p className="text-xs text-slate-600">No news yet — play a match to generate headlines.</p>}
+          {game.news.length === 0 && <p className="text-xs text-slate-600">No news yet.</p>}
         </div>
       </section>
 

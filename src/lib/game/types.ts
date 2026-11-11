@@ -181,9 +181,9 @@ export type Mentality = "defensive" | "balanced" | "attacking";
 export type Difficulty = "amateur" | "pro" | "legend";
 
 export const DIFFICULTY_META: Record<Difficulty, { label: string; desc: string; aiBoost: number; prizeMult: number }> = {
-  amateur: { label: "Amateur", desc: "Relaxed — weaker rivals, richer prize money.", aiBoost: -3, prizeMult: 1.2 },
-  pro: { label: "Pro", desc: "The intended experience. Fair fights.", aiBoost: 0, prizeMult: 1 },
-  legend: { label: "Legend", desc: "Rivals sharpen up, budgets tighten. Brutal.", aiBoost: 3, prizeMult: 0.9 },
+  amateur: { label: "Amateur", desc: "Weaker rivals, richer prize money.", aiBoost: -3, prizeMult: 1.2 },
+  pro: { label: "Pro", desc: "Balanced difficulty.", aiBoost: 0, prizeMult: 1 },
+  legend: { label: "Legend", desc: "Stronger rivals, tighter budgets.", aiBoost: 3, prizeMult: 0.9 },
 };
 
 /** FIFA-style tactical sliders (1-100). Applied inside the match engine. */

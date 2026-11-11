@@ -167,7 +167,7 @@ export function DangerZone() {
                 Total items to be deleted: <span className="text-rose-400 tabular-nums">{total}</span>
               </p>
               <p className="text-[10px] text-slate-500 mt-0.5 leading-snug">
-                Nothing is kept back — cloud careers and the on-device cache are emptied everywhere.
+                Cloud careers and local data are all deleted.
               </p>
             </div>
           </div>
@@ -214,7 +214,7 @@ export function DangerZone() {
                 <AlertDialogHeader>
                   <AlertDialogTitle>Regenerate the player database?</AlertDialogTitle>
                   <AlertDialogDescription>
-                    Builds a fresh 10-club world including the new LWB / RWB / CDM depth chart. Existing saves stay untouched — new squads appear when you start or reload careers.
+                    Builds a fresh 10-club world. Existing saves stay untouched.
                   </AlertDialogDescription>
                 </AlertDialogHeader>
                 <AlertDialogFooter>
@@ -239,9 +239,9 @@ export function DangerZone() {
               This action is permanent and cannot be undone!
             </p>
             <ul className="mt-2 space-y-1.5 text-[11px] text-rose-300/80 list-disc pl-7 pr-1 marker:text-rose-400/60">
-              <li>Every career save — cloud (Neon Postgres) and local cache — will be deleted</li>
+              <li>All career saves will be deleted</li>
               <li>Your active career, season stats, records and trophies will be gone on ALL devices</li>
-              <li>The master player &amp; club database is re-pulled fresh from Neon (factory defaults only when offline)</li>
+              <li>The player and club database is reloaded from the cloud</li>
               <li>Onboarding starts over as if you just installed the app</li>
             </ul>
           </div>

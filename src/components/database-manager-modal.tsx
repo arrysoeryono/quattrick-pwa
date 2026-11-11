@@ -184,7 +184,7 @@ export function DatabaseManagerModal({
       });
     } else {
       toast({
-        title: "Cloud import failed — database saved locally only",
+        title: "Cloud import failed, data saved on this device only",
         description: `${dataset.leagues.length} leagues, ${dataset.teams.length} teams and ${dataset.players.length} players were kept on this device.`,
         variant: "destructive",
       });

@@ -145,7 +145,7 @@ export const useAppStore = create<AppStore>((set, get) => {
     dataset: Dataset,
   ): Promise<{ recordId: string | null; cloudId: string | null }> => {
     const clubName = dataset.teams.find((t) => t.id === state.clubId)?.name ?? "Club";
-    const saveName = `${state.managerName} — ${clubName} (S${state.season})`.slice(0, 100);
+    const saveName = `${state.managerName} - ${clubName} (S${state.season})`.slice(0, 100);
 
     // 1) local write-through cache
     const record = await putSave(state, clubName, localSaveId, saveName).catch(() => null);
@@ -438,8 +438,8 @@ export const useAppStore = create<AppStore>((set, get) => {
       if (!st.game || !st.dataset) return { ok: false, message: "No active career" };
       const r = await persistGame(st.game, st.saveId ?? undefined, st.dataset);
       return r.cloudId
-        ? { ok: true, message: "Career synced to Neon cloud" }
-        : { ok: false, message: "Cloud unreachable — the next change will retry automatically" };
+        ? { ok: true, message: "Career synced" }
+        : { ok: false, message: "Cloud unreachable, will retry automatically" };
     },
 
     /* ---------- live match ---------- */
@@ -525,7 +525,7 @@ export const useAppStore = create<AppStore>((set, get) => {
         set({ cloudOnline: true });
         return {
           ok: true,
-          message: `Cloud database pulled — ${json.dataset.teams.length} clubs and ${json.dataset.players.length} players are now active on this device`,
+          message: `Database reloaded: ${json.dataset.teams.length} clubs, ${json.dataset.players.length} players`,
         };
       } catch (e) {
         set({ cloudOnline: false });

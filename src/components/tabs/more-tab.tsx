@@ -14,7 +14,6 @@ import { Cloud, CloudDownload, CloudOff, CloudUpload, Database, Download, FileSp
 
 export function MoreTab() {
   const dataset = useAppStore((s) => s.dataset);
-  const datasetSource = useAppStore((s) => s.datasetSource);
   const game = useAppStore((s) => s.game);
   const saves = useAppStore((s) => s.saves);
   const activeCloudId = useAppStore((s) => s.activeCloudId);
@@ -95,7 +94,7 @@ export function MoreTab() {
         </div>
         <div className="flex items-center gap-2">
           <div className="flex-1">
-            <p className="text-[11px] font-semibold text-slate-300">Youth academy · level {game.facilityLevel}/5</p>
+            <p className="text-[11px] font-semibold text-slate-300">Youth academy level {game.facilityLevel}/5</p>
             <p className="text-[10px] text-slate-500">Better facilities produce stronger academy regens each season.</p>
           </div>
           <Button
@@ -143,10 +142,10 @@ export function MoreTab() {
             )}
             <div>
               <p className="text-sm font-semibold text-slate-200">
-                {cloudOnline === false ? "Cloud offline — cached mode" : cloudOnline === null ? "Checking cloud..." : "Neon Postgres · auto-sync ON"}
+                {cloudOnline === false ? "Offline" : cloudOnline === null ? "Connecting..." : "Auto-sync on"}
               </p>
               <p className="text-[11px] text-slate-500">
-                Master DB: {dataset.players.length} players · {dataset.teams.length} clubs ({datasetSource ?? "unknown"})
+                Database: {dataset.players.length} players, {dataset.teams.length} clubs
               </p>
             </div>
           </div>
@@ -155,7 +154,7 @@ export function MoreTab() {
           </Badge>
         </div>
         <p className="text-[11px] text-slate-500 mt-2 leading-snug">
-          Every change (matches, transfers, tactics) is pushed to Neon automatically — continue the same career from any device.
+          Career data syncs to the cloud automatically.
         </p>
         <Button
           variant="outline"
@@ -164,7 +163,7 @@ export function MoreTab() {
           disabled={syncing || cloudOnline === false}
         >
           {syncing ? <RefreshCw className="h-4 w-4 mr-1.5 animate-spin" aria-hidden /> : <CloudUpload className="h-4 w-4 mr-1.5" aria-hidden />}
-          {syncing ? "Syncing to Neon..." : "Sync now"}
+          {syncing ? "Syncing..." : "Sync now"}
         </Button>
       </section>
 
@@ -172,10 +171,10 @@ export function MoreTab() {
       <section aria-label="Database tools" className="rounded-xl border border-slate-800 bg-slate-950/40 p-3">
         <div className="flex items-center gap-2 mb-3">
           <Database className="h-4 w-4 text-emerald-400" aria-hidden />
-          <p className="text-sm font-semibold text-slate-200">Excel Database Engine</p>
+          <p className="text-sm font-semibold text-slate-200">Excel Database</p>
         </div>
         <p className="text-[11px] text-slate-500 mb-3">
-          Download the .xlsx template, fill thousands of players/teams with Excel or AI tools, then import. The master database is shared by every device instantly.
+          Download the template, fill in players and teams, then import. The database is shared across all devices.
         </p>
         <div className="grid grid-cols-2 gap-2">
           <Button variant="outline" className="h-10 border-slate-700" onClick={() => setDbModal(true)}>
@@ -191,7 +190,7 @@ export function MoreTab() {
             disabled={cloudOnline === false}
           >
             <Download className="h-4 w-4 mr-1.5" aria-hidden />
-            Export cloud DB
+            Export database
           </Button>
         </div>
         <Button
@@ -201,10 +200,10 @@ export function MoreTab() {
           disabled={pulling || cloudOnline === false}
         >
           {pulling ? <RefreshCw className="h-4 w-4 mr-1.5 animate-spin" aria-hidden /> : <CloudDownload className="h-4 w-4 mr-1.5" aria-hidden />}
-          {pulling ? "Pulling from Neon..." : "Pull cloud DB to this device"}
+          {pulling ? "Loading..." : "Reload database from cloud"}
         </Button>
         <p className="text-[10px] text-slate-600 mt-2 leading-snug">
-          Imported an Excel database on another device? Tap this to download the latest Neon master database right now — new clubs and players appear in the transfer market and new careers immediately.
+          Get the latest database from the cloud. New clubs and players appear right away.
         </p>
       </section>
 
@@ -223,7 +222,7 @@ export function MoreTab() {
         </div>
         <div className="space-y-2">
           {saves.length === 0 && (
-            <p className="text-[11px] text-slate-600">No careers in the cloud yet — they appear here as soon as you start one.</p>
+            <p className="text-[11px] text-slate-600">No saved careers yet.</p>
           )}
           {saves.map((s) => {
             const active = s.id === activeCloudId;
@@ -231,7 +230,7 @@ export function MoreTab() {
               <div key={s.id} className="flex items-center gap-2 rounded-xl border border-slate-800 bg-slate-950/40 p-2.5">
                 <div className="min-w-0 flex-1">
                   <p className="text-xs font-semibold text-slate-200 truncate">
-                    {s.saveName} {active && <span className="text-emerald-400">· active</span>}
+                    {s.saveName} {active && <span className="text-emerald-400">(active)</span>}
                   </p>
                   <p className="text-[10px] text-slate-500">
                     {formatDate(typeof s.currentDate === "string" ? s.currentDate.slice(0, 10) : String(s.currentDate))} · updated {new Date(s.updatedAt).toLocaleTimeString()}
@@ -259,16 +258,13 @@ export function MoreTab() {
 
       <Separator className="bg-slate-800" />
 
-      {/* danger zone — full reset engine with live data preview */}
+      {/* danger zone */}
       <DangerZone />
 
       {/* about */}
       <section aria-label="About" className="rounded-xl border border-slate-800 bg-slate-950/40 p-3 text-center">
         <p className="text-xs font-bold text-slate-300">Quattrick Football Manager</p>
-        <p className="text-[10px] text-slate-500 mt-0.5">
-          v4.1 Full Online · Next.js PWA · Neon Postgres cloud saves · Web Worker match sim
-        </p>
-        <p className="text-[10px] text-slate-600 mt-1">Season {game.season} · Manager {game.managerName}</p>
+        <p className="text-[10px] text-slate-600 mt-1">Season {game.season}, Manager {game.managerName}</p>
       </section>
 
       {/* database manager modal */}
@@ -278,7 +274,7 @@ export function MoreTab() {
         currentDataset={dataset}
         onImportComplete={(ds) => {
           void importDataset(ds, "excel");
-          showBusy("Excel database imported — live for every device", 4500);
+          showBusy("Database imported", 4500);
         }}
       />
     </div>

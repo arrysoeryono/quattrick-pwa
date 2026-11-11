@@ -299,7 +299,7 @@ const GOAL_TXT = [
   "{p} smashes it into the net!",
   "GOAL! {p} makes no mistake from close range!",
   "{p} slots it home coolly past the keeper!",
-  "Clinical from {p} — the roof comes off!",
+  "Clinical from {p}! The roof comes off!",
 ];
 const SAVE_TXT = [
   "{g} denies {p} with a brilliant save!",
@@ -337,7 +337,7 @@ function resolveShot(att: TeamSim, def: TeamSim, shooter: SimPlayer, dist: numbe
     });
     if (assister && rng() < 0.68) {
       assister.assists++; assister.rating += 0.6;
-      events.push({ minute, type: "goal", teamSide: att.side, text: `${assister.name} sets it up — ${fill(GOAL_TXT[Math.floor(rng() * GOAL_TXT.length)], shooter)}` });
+      events.push({ minute, type: "goal", teamSide: att.side, text: `${assister.name} sets it up! ${fill(GOAL_TXT[Math.floor(rng() * GOAL_TXT.length)], shooter)}` });
     } else {
       events.push({ minute, type: "goal", teamSide: att.side, text: fill(GOAL_TXT[Math.floor(rng() * GOAL_TXT.length)], shooter) });
     }
@@ -453,7 +453,7 @@ function simulateMinute(): void {
     const p = pickWeighted(onPitch(t), () => 1);
     if (p && !injuries.includes(p.id)) {
       injuries.push(p.id);
-      events.push({ minute, type: "injury", teamSide: t.side, text: `${p.name} pulls up holding his hamstring — he looks in trouble.` });
+      events.push({ minute, type: "injury", teamSide: t.side, text: `${p.name} pulls up holding his hamstring. He looks in trouble.` });
     }
   }
 
@@ -565,7 +565,7 @@ function begin(fixture: number, hCfg: MatchTeamConfig, aCfg: MatchTeamConfig, sp
   shotLog = [];
   shoutsLeft = 3;
   userTeamId = userTeam ?? -1;
-  events = [{ minute: 0, type: "ko", teamSide: "neutral", text: `Kick-off at ${hCfg.name}! ${hCfg.shortName} vs ${aCfg.shortName}.${isDerby ? " DERBY DAY — the atmosphere is electric!" : ""}` }];
+  events = [{ minute: 0, type: "ko", teamSide: "neutral", text: `Kick-off at ${hCfg.name}! ${hCfg.shortName} vs ${aCfg.shortName}.${isDerby ? " DERBY DAY! The atmosphere is electric!" : ""}` }];
   speed = spd;
   injuries = [];
   void run();
@@ -582,19 +582,19 @@ function applyShout(id: "go-all-out" | "park-the-bus" | "press-hard" | "time-was
     t.mods.att *= 1.06;
     t.mods.def *= 0.96;
     t.mods.staminaDrain += 0.015;
-    events.push({ minute, type: "info", teamSide: t.side, text: `The manager demands everything — ${t.cfg.shortName} throw men forward!` });
+    events.push({ minute, type: "info", teamSide: t.side, text: `The manager demands everything! ${t.cfg.shortName} throw men forward!` });
   } else if (id === "park-the-bus") {
     t.mentality = "defensive";
     t.mods.def *= 1.07;
     t.mods.att *= 0.94;
-    events.push({ minute, type: "info", teamSide: t.side, text: `${t.cfg.shortName} drop into a low block — park the bus!` });
+    events.push({ minute, type: "info", teamSide: t.side, text: `${t.cfg.shortName} drop into a low block and park the bus!` });
   } else if (id === "press-hard") {
     t.mods.press += 12;
     t.mods.staminaDrain += 0.02;
     events.push({ minute, type: "info", teamSide: t.side, text: `Press! Press! ${t.cfg.shortName} hunt the ball all over the pitch.` });
   } else {
     t.mods.mid *= 1.03;
-    events.push({ minute, type: "info", teamSide: t.side, text: `${t.cfg.shortName} slow it down and keep the ball — running down the clock.` });
+    events.push({ minute, type: "info", teamSide: t.side, text: `${t.cfg.shortName} slow it down and keep the ball, running down the clock.` });
   }
 }
 

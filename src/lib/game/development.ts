@@ -56,9 +56,9 @@ export const FOCUS_POOL: Record<string, (keyof PlayerAttributes)[]> = {
 };
 
 export const INTENSITY_META = {
-  light: { xpMult: 0.7, staminaDelta: 5, injuryRisk: 0, label: "Light — recover fast, slow growth" },
-  normal: { xpMult: 1.0, staminaDelta: 0, injuryRisk: 0, label: "Normal — steady development" },
-  intense: { xpMult: 1.35, staminaDelta: -6, injuryRisk: 0.02, label: "Intense — fast growth, fatigue & injury risk" },
+  light: { xpMult: 0.7, staminaDelta: 5, injuryRisk: 0, label: "Recover fast, slow growth" },
+  normal: { xpMult: 1.0, staminaDelta: 0, injuryRisk: 0, label: "Steady development" },
+  intense: { xpMult: 1.35, staminaDelta: -6, injuryRisk: 0.02, label: "Fast growth, higher injury risk" },
 } as const;
 
 export interface WeeklyTrainingResult {
@@ -79,16 +79,16 @@ export interface DevPathDef {
 
 export const DEV_PATHS: DevPathDef[] = [
   { id: "poacher", name: "Poacher", desc: "Lives in the box. Finishing and strength above all.", attrs: ["shooting", "physical"], groups: ["ATT"] },
-  { id: "complete-forward", name: "Complete Forward", desc: "All-round attacker — every attribute grows.", attrs: ["shooting", "pace", "dribbling", "passing", "physical"], groups: ["ATT"] },
+  { id: "complete-forward", name: "Complete Forward", desc: "All-round attacker. Every attribute grows.", attrs: ["shooting", "pace", "dribbling", "passing", "physical"], groups: ["ATT"] },
   { id: "dribbler", name: "Dribbler", desc: "Slaloming winger who beats anyone one-on-one.", attrs: ["dribbling", "pace"], groups: ["ATT", "MID"] },
   { id: "playmaker", name: "Playmaker", desc: "The passing hub everything flows through.", attrs: ["passing", "dribbling"], groups: ["MID"] },
   { id: "engine", name: "Engine", desc: "Box-to-box monster with endless legs.", attrs: ["physical", "pace"], groups: ["MID", "DEF"] },
   { id: "sniper", name: "Sniper", desc: "Late runner who arrives shooting from range.", attrs: ["shooting", "pace"], groups: ["MID"] },
   { id: "stopper", name: "Stopper", desc: "Aggressive, dominant, wins every duel.", attrs: ["physical", "defending"], groups: ["DEF"] },
   { id: "ball-player", name: "Ball-Playing Defender", desc: "Steps out and starts attacks from the back.", attrs: ["passing", "defending"], groups: ["DEF"] },
-  { id: "speedster", name: "Speedster", desc: "Recovery pace to burn — nothing gets behind.", attrs: ["pace", "defending"], groups: ["DEF"] },
+  { id: "speedster", name: "Speedster", desc: "Recovery pace to burn. Nothing gets behind.", attrs: ["pace", "defending"], groups: ["DEF"] },
   { id: "shot-stopper", name: "Shot Stopper", desc: "Reflex saves, commands his six-yard box.", attrs: ["physical", "defending"], groups: ["GK"] },
-  { id: "sweeper-keeper", name: "Sweeper Keeper", desc: "Distribution and footwork — an eleventh outfielder.", attrs: ["passing", "pace"], groups: ["GK"] },
+  { id: "sweeper-keeper", name: "Sweeper Keeper", desc: "Distribution and footwork. An eleventh outfielder.", attrs: ["passing", "pace"], groups: ["GK"] },
 ];
 
 export function devPathsFor(player: { position: PositionCode }): DevPathDef[] {
