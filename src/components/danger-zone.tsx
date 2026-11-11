@@ -13,13 +13,12 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { generateDefaultDataset } from "@/lib/game/defaultData";
-import { getGameDb } from "@/lib/game/dexie";
 import { cn } from "@/lib/utils";
 import {
+  Cloud,
   Database,
   Eye,
   EyeOff,
-  HardDrive,
   ListOrdered,
   RefreshCw,
   Shield,
@@ -44,6 +43,8 @@ interface DataCounts {
 export function DangerZone() {
   const game = useAppStore((s) => s.game);
   const dataset = useAppStore((s) => s.dataset);
+  const saves = useAppStore((s) => s.saves);
+  const refreshSaves = useAppStore((s) => s.refreshSaves);
   const importDataset = useAppStore((s) => s.importDataset);
   const resetAllData = useAppStore((s) => s.resetAllData);
 
@@ -74,13 +75,12 @@ export function DangerZone() {
     });
   };
 
-  /* live recount straight from IndexedDB + active state */
+  /* live recount from cloud save list + active state */
   const recount = useCallback(async () => {
     setRefreshing(true);
     try {
-      const saves = await getGameDb().saves.count().catch(() => 0);
       setCounts({
-        saves,
+        saves: useAppStore.getState().saves.length,
         careers: game ? 1 : 0,
         trophies: game?.achievements?.length ?? 0,
         players: dataset?.players.length ?? 0,
@@ -90,7 +90,7 @@ export function DangerZone() {
     } finally {
       setRefreshing(false);
     }
-  }, [game, dataset]);
+  }, [game, dataset, saves.length]);
 
   useEffect(() => {
     void recount();
@@ -100,7 +100,7 @@ export function DangerZone() {
   const confirmed = confirmText.trim() === CONFIRM_PHRASE;
 
   const summaryItems = [
-    { label: "Local saves", icon: HardDrive, value: counts?.saves ?? 0 },
+    { label: "Cloud saves", icon: Cloud, value: counts?.saves ?? 0 },
     { label: "Active career", icon: User, value: counts?.careers ?? 0 },
     { label: "Trophies", icon: Trophy, value: counts?.trophies ?? 0 },
     { label: "Players", icon: Users, value: counts?.players ?? 0 },
@@ -144,7 +144,7 @@ export function DangerZone() {
                 variant="ghost"
                 size="icon"
                 className="h-7 w-7 text-slate-400 hover:text-rose-300 hover:bg-rose-500/10"
-                onClick={() => void recount()}
+                onClick={() => void refreshSaves().then(() => recount())}
                 aria-label="Refresh data summary"
                 disabled={refreshing}
               >
@@ -167,7 +167,7 @@ export function DangerZone() {
                 Total items to be deleted: <span className="text-rose-400 tabular-nums">{total}</span>
               </p>
               <p className="text-[10px] text-slate-500 mt-0.5 leading-snug">
-                Nothing is kept back. The whole on-device game database is emptied.
+                Nothing is kept back — cloud careers and the on-device cache are emptied everywhere.
               </p>
             </div>
           </div>
@@ -239,11 +239,10 @@ export function DangerZone() {
               This action is permanent and cannot be undone!
             </p>
             <ul className="mt-2 space-y-1.5 text-[11px] text-rose-300/80 list-disc pl-7 pr-1 marker:text-rose-400/60">
-              <li>Every local career save on this device (IndexedDB) will be deleted</li>
-              <li>Your active career, season stats, records and trophies will be gone</li>
-              <li>The player &amp; club database is wiped, then re-synced fresh from the Neon cloud (factory defaults only when offline)</li>
+              <li>Every career save — cloud (Neon Postgres) and local cache — will be deleted</li>
+              <li>Your active career, season stats, records and trophies will be gone on ALL devices</li>
+              <li>The master player &amp; club database is re-pulled fresh from Neon (factory defaults only when offline)</li>
               <li>Onboarding starts over as if you just installed the app</li>
-              <li>Cloud career saves in Neon Postgres are NOT removed — delete those separately first if wanted</li>
             </ul>
           </div>
 

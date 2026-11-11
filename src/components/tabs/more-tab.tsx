@@ -1,82 +1,60 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useAppStore, type CloudSaveMeta } from "@/lib/store/gameStore";
+import { useAppStore } from "@/lib/store/gameStore";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { DatabaseManagerModal } from "@/components/database-manager-modal";
 import { DangerZone } from "@/components/danger-zone";
-import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
 import { formatDate, formatMoney } from "@/lib/format";
 import { ACHIEVEMENTS } from "@/lib/game/career";
 import { cn } from "@/lib/utils";
-import { Cloud, CloudDownload, CloudOff, Database, Download, FileSpreadsheet, HardDrive, RefreshCw, Save, Trash2, Trophy, Upload } from "lucide-react";
+import { Cloud, CloudDownload, CloudOff, CloudUpload, Database, Download, FileSpreadsheet, RefreshCw, Trash2, Trophy, Upload } from "lucide-react";
 
 export function MoreTab() {
   const dataset = useAppStore((s) => s.dataset);
   const datasetSource = useAppStore((s) => s.datasetSource);
   const game = useAppStore((s) => s.game);
   const saves = useAppStore((s) => s.saves);
-  const saveId = useAppStore((s) => s.saveId);
+  const activeCloudId = useAppStore((s) => s.activeCloudId);
   const cloudOnline = useAppStore((s) => s.cloudOnline);
-  const saveToCloud = useAppStore((s) => s.saveToCloud);
-  const fetchCloudSaves = useAppStore((s) => s.fetchCloudSaves);
-  const loadCloudSave = useAppStore((s) => s.loadCloudSave);
+  const syncNow = useAppStore((s) => s.syncNow);
+  const refreshSaves = useAppStore((s) => s.refreshSaves);
   const continueSave = useAppStore((s) => s.continueSave);
   const removeSave = useAppStore((s) => s.removeSave);
   const importDataset = useAppStore((s) => s.importDataset);
   const disposeRunner = useAppStore((s) => s.disposeRunner);
-
   const pullCloudDatabase = useAppStore((s) => s.pullCloudDatabase);
 
   const [dbModal, setDbModal] = useState(false);
-  const [cloudSheet, setCloudSheet] = useState(false);
-  const [cloudSaves, setCloudSaves] = useState<CloudSaveMeta[]>([]);
-  const [cloudLoading, setCloudLoading] = useState(false);
   const [busyMsg, setBusyMsg] = useState<string | null>(null);
   const [pulling, setPulling] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+
+  const showBusy = (msg: string, ms = 4000) => {
+    setBusyMsg(msg);
+    setTimeout(() => setBusyMsg(null), ms);
+  };
+
+  const handleSyncNow = async () => {
+    setSyncing(true);
+    const res = await syncNow();
+    setSyncing(false);
+    showBusy(res.message, res.ok ? 3000 : 4500);
+    if (res.ok) void refreshSaves();
+  };
 
   const handlePullCloud = async () => {
     setPulling(true);
     const res = await pullCloudDatabase();
     setPulling(false);
-    setBusyMsg(res.message);
-    setTimeout(() => setBusyMsg(null), res.ok ? 5000 : 4000);
+    showBusy(res.message, res.ok ? 5000 : 4000);
   };
 
   useEffect(() => {
     disposeRunner();
   }, [disposeRunner]);
-
-  const handleCloudSave = async () => {
-    setBusyMsg("Syncing...");
-    const res = await saveToCloud();
-    if (res.ok) {
-      setBusyMsg("Career synced to cloud");
-      setTimeout(() => setBusyMsg(null), 3000);
-    } else {
-      setBusyMsg(res.message);
-      setTimeout(() => setBusyMsg(null), 4000);
-    }
-  };
-
-  const openCloudSheet = async () => {
-    setCloudSheet(true);
-    setCloudLoading(true);
-    const list = await fetchCloudSaves();
-    setCloudSaves(list);
-    setCloudLoading(false);
-  };
-
-  const handleCloudLoad = async (id: string) => {
-    setCloudLoading(true);
-    const res = await loadCloudSave(id);
-    setCloudLoading(false);
-    setCloudSheet(false);
-    setBusyMsg(res.message);
-    setTimeout(() => setBusyMsg(null), 3000);
-  };
 
   if (!game || !dataset) return null;
   const unlocked = game.achievements ?? [];
@@ -154,8 +132,8 @@ export function MoreTab() {
         </button>
       </section>
 
-      {/* cloud status */}
-      <section aria-label="Cloud status" className="rounded-xl border border-slate-800 bg-slate-950/40 p-3">
+      {/* cloud status — full online, auto-sync */}
+      <section aria-label="Cloud sync status" className="rounded-xl border border-slate-800 bg-slate-950/40 p-3">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             {cloudOnline === false ? (
@@ -165,27 +143,29 @@ export function MoreTab() {
             )}
             <div>
               <p className="text-sm font-semibold text-slate-200">
-                {cloudOnline === false ? "Cloud offline" : cloudOnline === null ? "Checking cloud..." : "Neon Postgres connected"}
+                {cloudOnline === false ? "Cloud offline — cached mode" : cloudOnline === null ? "Checking cloud..." : "Neon Postgres · auto-sync ON"}
               </p>
               <p className="text-[11px] text-slate-500">
-                Local dataset source: {datasetSource ?? "unknown"} · {dataset.players.length} players loaded
+                Master DB: {dataset.players.length} players · {dataset.teams.length} clubs ({datasetSource ?? "unknown"})
               </p>
             </div>
           </div>
           <Badge variant="outline" className={cloudOnline === false ? "border-slate-700 text-slate-500" : "border-emerald-500/40 text-emerald-400"}>
-            {cloudOnline === false ? "LOCAL" : "CLOUD"}
+            {cloudOnline === false ? "OFFLINE" : "ONLINE"}
           </Badge>
         </div>
-        <div className="mt-3 grid grid-cols-2 gap-2">
-          <Button className="h-10 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold" onClick={() => void handleCloudSave()} disabled={cloudOnline === false}>
-            <Save className="h-4 w-4 mr-1.5" aria-hidden />
-            Sync save
-          </Button>
-          <Button variant="outline" className="h-10 border-slate-700" onClick={() => void openCloudSheet()} disabled={cloudOnline === false}>
-            <Upload className="h-4 w-4 mr-1.5" aria-hidden />
-            Load from cloud
-          </Button>
-        </div>
+        <p className="text-[11px] text-slate-500 mt-2 leading-snug">
+          Every change (matches, transfers, tactics) is pushed to Neon automatically — continue the same career from any device.
+        </p>
+        <Button
+          variant="outline"
+          className="mt-2 w-full h-10 border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/10"
+          onClick={() => void handleSyncNow()}
+          disabled={syncing || cloudOnline === false}
+        >
+          {syncing ? <RefreshCw className="h-4 w-4 mr-1.5 animate-spin" aria-hidden /> : <CloudUpload className="h-4 w-4 mr-1.5" aria-hidden />}
+          {syncing ? "Syncing to Neon..." : "Sync now"}
+        </Button>
       </section>
 
       {/* database manager */}
@@ -195,7 +175,7 @@ export function MoreTab() {
           <p className="text-sm font-semibold text-slate-200">Excel Database Engine</p>
         </div>
         <p className="text-[11px] text-slate-500 mb-3">
-          Download the .xlsx template, fill thousands of players/teams with Excel or AI tools, then import. The active database also exports back out for modding.
+          Download the .xlsx template, fill thousands of players/teams with Excel or AI tools, then import. The master database is shared by every device instantly.
         </p>
         <div className="grid grid-cols-2 gap-2">
           <Button variant="outline" className="h-10 border-slate-700" onClick={() => setDbModal(true)}>
@@ -224,41 +204,56 @@ export function MoreTab() {
           {pulling ? "Pulling from Neon..." : "Pull cloud DB to this device"}
         </Button>
         <p className="text-[10px] text-slate-600 mt-2 leading-snug">
-          Imported an Excel database on another device? Tap this to download the latest Neon master database here — new clubs and players then appear in onboarding and the transfer market.
+          Imported an Excel database on another device? Tap this to download the latest Neon master database right now — new clubs and players appear in the transfer market and new careers immediately.
         </p>
       </section>
 
-      {/* local saves */}
-      <section aria-label="Local saves">
+      {/* cloud careers */}
+      <section aria-label="Saved careers">
         <div className="flex items-center justify-between mb-2">
-          <h2 className="text-xs font-semibold uppercase tracking-wider text-slate-500">Local saves (IndexedDB)</h2>
-          <HardDrive className="h-3.5 w-3.5 text-slate-600" aria-hidden />
+          <h2 className="text-xs font-semibold uppercase tracking-wider text-slate-500">Saved careers (cloud)</h2>
+          <button
+            type="button"
+            className="text-slate-500 hover:text-emerald-400 transition-colors"
+            onClick={() => void refreshSaves()}
+            aria-label="Refresh saved careers"
+          >
+            <RefreshCw className="h-3.5 w-3.5" aria-hidden />
+          </button>
         </div>
         <div className="space-y-2">
-          {saves.map((s) => (
-            <div key={s.id} className="flex items-center gap-2 rounded-xl border border-slate-800 bg-slate-950/40 p-2.5">
-              <div className="min-w-0 flex-1">
-                <p className="text-xs font-semibold text-slate-200 truncate">
-                  {s.name} {s.id === saveId && <span className="text-emerald-400">· active</span>}
-                </p>
-                <p className="text-[10px] text-slate-500">{formatDate(s.currentDate)} · updated {new Date(s.updatedAt).toLocaleTimeString()}</p>
-              </div>
-              {s.id !== saveId && (
-                <Button variant="outline" size="sm" className="h-7 border-slate-700 text-[11px]" onClick={() => void continueSave(s.id)}>
-                  Load
+          {saves.length === 0 && (
+            <p className="text-[11px] text-slate-600">No careers in the cloud yet — they appear here as soon as you start one.</p>
+          )}
+          {saves.map((s) => {
+            const active = s.id === activeCloudId;
+            return (
+              <div key={s.id} className="flex items-center gap-2 rounded-xl border border-slate-800 bg-slate-950/40 p-2.5">
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs font-semibold text-slate-200 truncate">
+                    {s.saveName} {active && <span className="text-emerald-400">· active</span>}
+                  </p>
+                  <p className="text-[10px] text-slate-500">
+                    {formatDate(typeof s.currentDate === "string" ? s.currentDate.slice(0, 10) : String(s.currentDate))} · updated {new Date(s.updatedAt).toLocaleTimeString()}
+                  </p>
+                </div>
+                {!active && (
+                  <Button variant="outline" size="sm" className="h-7 border-slate-700 text-[11px]" onClick={() => void continueSave(s.id)}>
+                    Load
+                  </Button>
+                )}
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7 text-slate-500 hover:text-rose-400"
+                  aria-label={`Delete save ${s.saveName}`}
+                  onClick={() => void removeSave(s.id)}
+                >
+                  <Trash2 className="h-3.5 w-3.5" aria-hidden />
                 </Button>
-              )}
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-7 w-7 text-slate-500 hover:text-rose-400"
-                aria-label={`Delete save ${s.name}`}
-                onClick={() => void removeSave(s.id)}
-              >
-                <Trash2 className="h-3.5 w-3.5" aria-hidden />
-              </Button>
-            </div>
-          ))}
+              </div>
+            );
+          })}
         </div>
       </section>
 
@@ -271,7 +266,7 @@ export function MoreTab() {
       <section aria-label="About" className="rounded-xl border border-slate-800 bg-slate-950/40 p-3 text-center">
         <p className="text-xs font-bold text-slate-300">Quattrick Football Manager</p>
         <p className="text-[10px] text-slate-500 mt-0.5">
-          v4.0 Master Edition · Next.js PWA · Dexie offline engine · Neon Postgres cloud · Web Worker match sim
+          v4.1 Full Online · Next.js PWA · Neon Postgres cloud saves · Web Worker match sim
         </p>
         <p className="text-[10px] text-slate-600 mt-1">Season {game.season} · Manager {game.managerName}</p>
       </section>
@@ -283,43 +278,9 @@ export function MoreTab() {
         currentDataset={dataset}
         onImportComplete={(ds) => {
           void importDataset(ds, "excel");
-          setBusyMsg("Excel database imported — available for new careers");
-          setTimeout(() => setBusyMsg(null), 4000);
+          showBusy("Excel database imported — live for every device", 4500);
         }}
       />
-
-      {/* cloud saves sheet */}
-      <Sheet open={cloudSheet} onOpenChange={setCloudSheet}>
-        <SheetContent side="bottom" className="max-h-[min(70dvh,70vh)] overflow-y-auto overscroll-contain scrollbar-thin touch-scroll rounded-t-2xl border-slate-800 bg-slate-900">
-          <SheetHeader className="px-4 pt-4">
-            <SheetTitle>Cloud saves</SheetTitle>
-            <SheetDescription>Saved careers stored in Neon Postgres for this device.</SheetDescription>
-          </SheetHeader>
-          <div className="p-4 space-y-2">
-            {cloudLoading && (
-              <p className="flex items-center gap-2 text-xs text-slate-400">
-                <RefreshCw className="h-3.5 w-3.5 animate-spin" aria-hidden /> Loading cloud saves...
-              </p>
-            )}
-            {!cloudLoading && cloudSaves.length === 0 && (
-              <p className="text-xs text-slate-500">No cloud saves yet — hit Sync save first.</p>
-            )}
-            {cloudSaves.map((s) => (
-              <div key={s.id} className="flex items-center gap-2 rounded-xl border border-slate-800 bg-slate-950/40 p-2.5">
-                <div className="min-w-0 flex-1">
-                  <p className="text-xs font-semibold text-slate-200 truncate">{s.saveName}</p>
-                  <p className="text-[10px] text-slate-500">
-                    {formatDate(typeof s.currentDate === "string" ? s.currentDate.slice(0, 10) : String(s.currentDate))} · {new Date(s.updatedAt).toLocaleString()}
-                  </p>
-                </div>
-                <Button size="sm" className="h-7 bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-[11px] font-bold" onClick={() => void handleCloudLoad(s.id)}>
-                  Load
-                </Button>
-              </div>
-            ))}
-          </div>
-        </SheetContent>
-      </Sheet>
     </div>
   );
 }

@@ -5,7 +5,7 @@ import { useAppStore } from "@/lib/store/gameStore";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Cloud, CloudOff, HardDriveDownload, Play, Trash2, Trophy, UserRound } from "lucide-react";
+import { Cloud, CloudOff, Play, Trash2, Trophy, UserRound } from "lucide-react";
 import { formatDate } from "@/lib/format";
 import { DIFFICULTY_META, type Difficulty } from "@/lib/game/types";
 import { cn } from "@/lib/utils";
@@ -66,11 +66,11 @@ export function OnboardingScreen() {
           <div className="mt-4 flex items-center gap-2 text-xs">
             {cloudOnline === false ? (
               <Badge variant="outline" className="gap-1 border-slate-700 text-slate-400">
-                <CloudOff className="h-3 w-3" aria-hidden /> Offline mode — local saves only
+                <CloudOff className="h-3 w-3" aria-hidden /> Offline — showing cached data
               </Badge>
             ) : (
               <Badge variant="outline" className="gap-1 border-emerald-500/30 text-emerald-400">
-                <Cloud className="h-3 w-3" aria-hidden /> Cloud saves ready
+                <Cloud className="h-3 w-3" aria-hidden /> Cloud connected — synced on every device
               </Badge>
             )}
             <Badge variant="outline" className="border-slate-700 text-slate-400">
@@ -91,23 +91,23 @@ export function OnboardingScreen() {
                       key={s.id}
                       className="flex items-center gap-3 rounded-xl border border-slate-800 bg-slate-900 p-3"
                     >
-                      <div className={`h-9 w-9 shrink-0 rounded-lg ${crestColor(s.state?.clubId ?? 0)} flex items-center justify-center text-[10px] font-black text-white`}>
-                        {dataset?.teams.find((t) => t.id === s.state?.clubId)?.shortName ?? "FC"}
+                      <div className={`h-9 w-9 shrink-0 rounded-lg ${crestColor(s.clubId ?? 0)} flex items-center justify-center text-[10px] font-black text-white`}>
+                        {dataset?.teams.find((t) => t.id === s.clubId)?.shortName ?? "FC"}
                       </div>
                       <button
                         type="button"
                         onClick={() => void continueSave(s.id)}
                         className="flex-1 min-w-0 text-left"
-                        aria-label={`Continue career ${s.name}`}
+                        aria-label={`Continue career ${s.saveName}`}
                       >
-                        <p className="text-sm font-semibold text-slate-100 truncate">{s.name}</p>
-                        <p className="text-xs text-slate-500">{formatDate(s.currentDate)} · tap to continue</p>
+                        <p className="text-sm font-semibold text-slate-100 truncate">{s.saveName}</p>
+                        <p className="text-xs text-slate-500">{formatDate(typeof s.currentDate === "string" ? s.currentDate.slice(0, 10) : String(s.currentDate))} · tap to continue</p>
                       </button>
                       <Button
                         variant="ghost"
                         size="icon"
                         className="h-8 w-8 text-slate-500 hover:text-rose-400"
-                        aria-label={`Delete save ${s.name}`}
+                        aria-label={`Delete save ${s.saveName}`}
                         onClick={() => void removeSave(s.id)}
                       >
                         <Trash2 className="h-4 w-4" aria-hidden />
@@ -203,8 +203,8 @@ export function OnboardingScreen() {
                 {starting ? "Setting up squad..." : "Start Career"}
               </Button>
               <p className="text-[11px] text-slate-600 mt-3 flex items-center justify-center gap-1.5 text-center">
-                <HardDriveDownload className="h-3 w-3" aria-hidden />
-                Offline-first: saves live in IndexedDB, cloud sync optional
+                <Cloud className="h-3 w-3" aria-hidden />
+                Full online — careers and database live in Neon, identical on every device
               </p>
             </div>
           </div>

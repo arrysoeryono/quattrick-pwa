@@ -72,11 +72,11 @@ export function makeSaveRecord(state: GameState): SaveRecord {
   };
 }
 
-export async function putSave(state: GameState, clubName: string, saveId?: string): Promise<SaveRecord> {
+export async function putSave(state: GameState, clubName: string, saveId?: string, nameOverride?: string): Promise<SaveRecord> {
   const db = getGameDb();
   const record: SaveRecord = {
     id: saveId ?? crypto.randomUUID(),
-    name: `${state.managerName} — ${clubName}`,
+    name: nameOverride ?? `${state.managerName} — ${clubName}`,
     clubName,
     season: state.season,
     currentDate: state.currentDate,
