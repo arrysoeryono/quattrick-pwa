@@ -32,10 +32,11 @@ function normalizeAttributes(position: string, raw: Record<string, unknown> | nu
       reflexes: gkClamp(a.reflexes),
       positioning: gkClamp(a.positioning),
       kicking: gkClamp(a.kicking),
-      command: gkClamp(a.command),
+      // legacy rows may still carry the retired "command" key
+      speed: gkClamp(a.speed ?? a.command),
     };
     // legacy GK rows (old outfield columns, no GK columns) are converted
-    const hasGk = ["diving", "handling", "reflexes", "positioning", "kicking", "command"].some((k) => typeof a[k] === "number");
+    const hasGk = ["diving", "handling", "reflexes", "positioning", "kicking", "speed", "command"].some((k) => typeof a[k] === "number");
     if (!hasGk && typeof a.pace === "number") {
       return migrateLegacyGkAttributes(a as unknown as PlayerAttributes);
     }

@@ -66,11 +66,11 @@ export const FOCUS_POOL: Record<string, OutfieldAttrKey[]> = {
 
 /** Same focuses, keeper-flavoured pools. */
 export const GK_FOCUS_POOL: Record<string, GkAttrKey[]> = {
-  balanced: ["diving", "handling", "reflexes", "positioning", "kicking", "command"],
-  attacking: ["kicking", "command"],
+  balanced: ["diving", "handling", "reflexes", "positioning", "kicking", "speed"],
+  attacking: ["kicking", "speed"],
   defensive: ["diving", "handling"],
   technical: ["kicking", "handling"],
-  pace: ["reflexes", "diving"],
+  pace: ["speed", "reflexes"],
   shooting: ["positioning", "reflexes"],
 };
 
@@ -106,8 +106,8 @@ export const DEV_PATHS: DevPathDef[] = [
   { id: "stopper", name: "Stopper", desc: "Aggressive, dominant, wins every duel.", attrs: ["physical", "defending"], groups: ["DEF"] },
   { id: "ball-player", name: "Ball-Playing Defender", desc: "Steps out and starts attacks from the back.", attrs: ["passing", "defending"], groups: ["DEF"] },
   { id: "speedster", name: "Speedster", desc: "Recovery pace to burn. Nothing gets behind.", attrs: ["pace", "defending"], groups: ["DEF"] },
-  { id: "shot-stopper", name: "Shot Stopper", desc: "Reflex saves, commands his six-yard box.", attrs: ["reflexes", "diving"], groups: ["GK"] },
-  { id: "sweeper-keeper", name: "Sweeper Keeper", desc: "Distribution and footwork. An eleventh outfielder.", attrs: ["kicking", "command"], groups: ["GK"] },
+  { id: "shot-stopper", name: "Shot Stopper", desc: "Reflex saves, dominates his six-yard box.", attrs: ["reflexes", "diving"], groups: ["GK"] },
+  { id: "sweeper-keeper", name: "Sweeper Keeper", desc: "Distribution and footwork. An eleventh outfielder.", attrs: ["kicking", "speed"], groups: ["GK"] },
 ];
 
 export function devPathsFor(player: { position: PositionCode }): DevPathDef[] {
@@ -330,18 +330,18 @@ export function applySeasonDecay(player: PlayerState, rng: () => number = Math.r
   const intensity = player.age - 30; // 1,2,3...
   const decline = (n: number) => Math.max(1, Math.round(n * (0.7 + rng() * 0.6)));
   if (isGKAttributes(player.attributes)) {
-    // keepers fade later in the core skills; reflexes go first, distribution slowest
+    // keepers fade in mobility & reflexes first; distribution and handling hold up longest
     const reflexDrop = decline(intensity * 1.2);
-    const divingDrop = decline(intensity * 0.9);
-    const commandDrop = decline(intensity * 0.5);
+    const speedDrop = decline(intensity * 0.9);
+    const divingDrop = decline(intensity * 0.7);
     const kickDrop = rng() < 0.4 ? decline(intensity * 0.35) : 0;
     player.attributes = {
       ...player.attributes,
       reflexes: Math.max(20, player.attributes.reflexes - reflexDrop),
+      speed: Math.max(20, player.attributes.speed - speedDrop),
       diving: Math.max(20, player.attributes.diving - divingDrop),
-      handling: Math.max(20, player.attributes.handling - Math.round(reflexDrop * 0.4)),
-      positioning: Math.max(20, player.attributes.positioning - commandDrop),
-      command: Math.max(20, player.attributes.command - commandDrop),
+      handling: Math.max(20, player.attributes.handling - Math.round(reflexDrop * 0.3)),
+      positioning: Math.max(20, player.attributes.positioning - Math.round(speedDrop * 0.3)),
       kicking: Math.max(20, player.attributes.kicking - kickDrop),
     };
     recomputeOverall(player);
@@ -381,7 +381,7 @@ export function generateRegen(retired: PlayerRow, newId: number, rng: () => numb
         reflexes: 46 + Math.floor(rng() * 25),
         positioning: 42 + Math.floor(rng() * 25),
         kicking: 40 + Math.floor(rng() * 25),
-        command: 40 + Math.floor(rng() * 25),
+        speed: 42 + Math.floor(rng() * 25),
       }
     : {
         pace: 45 + Math.floor(rng() * 25),

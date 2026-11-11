@@ -72,7 +72,8 @@ export async function GET() {
             reflexes: a.reflexes ?? 50,
             positioning: a.positioning ?? 50,
             kicking: a.kicking ?? 50,
-            command: a.command ?? 50,
+            // legacy cloud rows may still carry the retired "command" key
+            speed: a.speed ?? a.command ?? 50,
           };
         }
         return {
@@ -83,7 +84,7 @@ export async function GET() {
           dribbling: a.dribbling ?? 50,
           defending: a.defending ?? 50,
           physical: a.physical ?? 50,
-          diving: null, handling: null, reflexes: null, positioning: null, kicking: null, command: null,
+          diving: null, handling: null, reflexes: null, positioning: null, kicking: null, speed: null,
         };
       }),
       {
@@ -91,7 +92,7 @@ export async function GET() {
           "id", "team_id", "name", "age", "position", "overall_rating", "potential",
           "market_value", "salary",
           "pace", "shooting", "passing", "dribbling", "defending", "physical",
-          "diving", "handling", "reflexes", "positioning", "kicking", "command",
+          "diving", "handling", "reflexes", "positioning", "kicking", "speed",
         ],
       },
     );

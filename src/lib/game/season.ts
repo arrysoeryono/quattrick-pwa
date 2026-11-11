@@ -165,7 +165,7 @@ export function buildAiTeamConfig(dataset: Dataset, team: TeamRow, formationName
     if (!pick) pick = squad[0];
     if (!pick) {
       const fallbackAttrs = slot === "GK"
-        ? { diving: 50, handling: 50, reflexes: 50, positioning: 50, kicking: 50, command: 50 }
+        ? { diving: 50, handling: 50, reflexes: 50, positioning: 50, kicking: 50, speed: 50 }
         : { pace: 50, shooting: 50, passing: 50, dribbling: 50, defending: 50, physical: 50 };
       players.push({
         id: -1, name: "Unknown", position: slot as PositionCode, ovr: 50,

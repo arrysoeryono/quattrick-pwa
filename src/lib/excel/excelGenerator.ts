@@ -20,15 +20,13 @@ const INSTRUCTION_LINES: readonly string[] = [
   "2. Teams sheet: id, league_id must match a league id, short_name max 5 chars",
   "3. Players sheet: position must be one of GK, CB, LB, LWB, RB, RWB, CDM, CM, CAM, LM, RM, LAM, RAM, LW, RW, LF, RF, CF, ST",
   "4. GOALKEEPERS (position = GK) use their own attribute columns:",
-  "   diving, handling, reflexes, positioning, kicking, command - leave the outfield columns empty",
+  "   diving, handling, reflexes, positioning, kicking, speed - leave the outfield columns empty",
   "5. OUTFIELD players use: pace, shooting, passing, dribbling, defending, physical - leave the GK columns empty",
   "Attribute values must be integers 1-99",
   "overall_rating is recomputed by the game engine but keep it realistic (weighted average of attributes)",
   "potential >= overall_rating recommended",
   "market_value and salary are integers (salary = weekly wage)",
   "You may generate thousands of rows using Excel formulas or AI tools, then import the file in-game.",
-  "",
-  "Delete the sample rows before importing your own data.",
 ];
 
 const LEAGUE_HEADERS: readonly string[] = ["id", "name", "country", "tier"];
@@ -39,67 +37,11 @@ const PLAYER_HEADERS: readonly string[] = [
   "id", "team_id", "name", "age", "position", "overall_rating", "potential",
   "market_value", "salary",
   "pace", "shooting", "passing", "dribbling", "defending", "physical",
-  "diving", "handling", "reflexes", "positioning", "kicking", "command",
+  "diving", "handling", "reflexes", "positioning", "kicking", "speed",
 ];
 
 type Cell = string | number | null;
 type SheetAoa = Cell[][];
-
-const TEMPLATE_LEAGUES: LeagueRow[] = [
-  { id: 1, name: "Premier League", country: "England", tier: 1 },
-];
-
-const TEMPLATE_TEAMS: TeamRow[] = [
-  {
-    id: 101,
-    leagueId: 1,
-    name: "Red Dragons FC",
-    shortName: "RDF",
-    logoUrl: null,
-    reputation: 85,
-    transferBudget: 50000000,
-    wageBudget: 500000,
-  },
-];
-
-const TEMPLATE_PLAYERS: PlayerRow[] = [
-  {
-    id: 1001,
-    teamId: 101,
-    name: "Marcus Vance",
-    age: 23,
-    position: "ST",
-    overallRating: 84,
-    potential: 90,
-    marketValue: 45000000,
-    salary: 120000,
-    attributes: { pace: 88, shooting: 85, passing: 75, dribbling: 82, defending: 40, physical: 78 },
-  },
-  {
-    id: 1002,
-    teamId: 101,
-    name: "Thiago Almeida",
-    age: 28,
-    position: "CB",
-    overallRating: 82,
-    potential: 84,
-    marketValue: 28000000,
-    salary: 95000,
-    attributes: { pace: 62, shooting: 45, passing: 70, dribbling: 55, defending: 88, physical: 86 },
-  },
-  {
-    id: 1003,
-    teamId: 101,
-    name: "Petr Novak",
-    age: 31,
-    position: "GK",
-    overallRating: 80,
-    potential: 81,
-    marketValue: 15000000,
-    salary: 80000,
-    attributes: { diving: 84, handling: 80, reflexes: 82, positioning: 79, kicking: 68, command: 77 },
-  },
-];
 
 function leagueToRow(league: LeagueRow): Cell[] {
   return [league.id, league.name, league.country, league.tier];
@@ -120,7 +62,7 @@ function playerToRow(player: PlayerRow): Cell[] {
   ];
   if (player.position === "GK" && "diving" in a) {
     const gk = a as GKAttributes;
-    return [...base, null, null, null, null, null, null, gk.diving, gk.handling, gk.reflexes, gk.positioning, gk.kicking, gk.command];
+    return [...base, null, null, null, null, null, null, gk.diving, gk.handling, gk.reflexes, gk.positioning, gk.kicking, gk.speed];
   }
   const o = a as PlayerAttributes;
   return [...base, o.pace ?? null, o.shooting ?? null, o.passing ?? null, o.dribbling ?? null, o.defending ?? null, o.physical ?? null, null, null, null, null, null, null];
@@ -155,15 +97,12 @@ function appendDatabaseSheets(
   );
 }
 
-/** Pure builder: the downloadable template workbook (Instructions + sample rows). */
+/** Pure builder: the downloadable template workbook (Instructions + empty
+ *  header-only sheets — no sample data). */
 export function buildTemplateWorkbook(): XLSX.WorkBook {
   const wb = XLSX.utils.book_new();
   appendInstructionsSheet(wb);
-  appendDatabaseSheets(wb, {
-    leagues: TEMPLATE_LEAGUES,
-    teams: TEMPLATE_TEAMS,
-    players: TEMPLATE_PLAYERS,
-  });
+  appendDatabaseSheets(wb, { leagues: [], teams: [], players: [] });
   return wb;
 }
 

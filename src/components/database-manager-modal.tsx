@@ -211,7 +211,7 @@ export function DatabaseManagerModal({
                 Excel Template
               </CardTitle>
               <CardDescription>
-                Download the official workbook with instructions and sample rows, then fill it
+                Download the official workbook with format instructions, then fill it
                 with your own leagues, teams and players.
               </CardDescription>
             </CardHeader>

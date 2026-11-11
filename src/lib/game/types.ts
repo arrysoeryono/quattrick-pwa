@@ -21,7 +21,7 @@ export interface GKAttributes {
   reflexes: number;
   positioning: number;
   kicking: number;
-  command: number;
+  speed: number;
 }
 
 /** Either attribute shape, depending on the player's position. */

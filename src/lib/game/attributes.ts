@@ -11,7 +11,7 @@ import type { GKAttributes, PlayerAttributes, PositionCode, PositionalAttributes
  *   REF  Reflexes     — reaction speed on close-range efforts
  *   POS  Positioning  — angles, being in the right spot
  *   KIC  Kicking      — goal kicks & distribution
- *   CMD  Command      — claiming crosses, organising the box
+ *   SPD  Speed        — mobility, rushing off the line, sweeper-keeping
  * ============================================================ */
 
 export const OUTFIELD_ATTR_KEYS = [
@@ -19,7 +19,7 @@ export const OUTFIELD_ATTR_KEYS = [
 ] as const;
 
 export const GK_ATTR_KEYS = [
-  "diving", "handling", "reflexes", "positioning", "kicking", "command",
+  "diving", "handling", "reflexes", "positioning", "kicking", "speed",
 ] as const;
 
 export type OutfieldAttrKey = (typeof OUTFIELD_ATTR_KEYS)[number];
@@ -42,7 +42,7 @@ export const GK_ATTR_LABELS: Record<GkAttrKey, string> = {
   reflexes: "REF",
   positioning: "POS",
   kicking: "KIC",
-  command: "CMD",
+  speed: "SPD",
 };
 
 export const GK_ATTR_FULL: Record<GkAttrKey, string> = {
@@ -51,7 +51,7 @@ export const GK_ATTR_FULL: Record<GkAttrKey, string> = {
   reflexes: "Reflexes",
   positioning: "Positioning",
   kicking: "Kicking",
-  command: "Command",
+  speed: "Speed",
 };
 
 /** True when the position is a goalkeeper slot. */
@@ -125,7 +125,22 @@ export function migrateLegacyGkAttributes(
     reflexes: mean + 4 + (old.pace - mean) * 0.3,
     positioning: mean + 5 + (old.defending - mean) * 0.4,
     kicking: mean - 10 + (old.passing - mean) * 0.5,
-    command: mean + 2 + (old.physical - mean) * 0.4,
+    speed: mean - 6 + (old.pace - mean) * 0.3,
+  });
+}
+
+/** Legacy rename: pre-v4.6 keepers carried "command" (CMD) where "speed"
+ *  (SPD) lives now. Maps the value 1:1 so nothing is lost. */
+export function migrateCommandToSpeed(attrs: GKAttributes): GKAttributes {
+  if ("speed" in attrs && typeof attrs.speed === "number") return attrs;
+  const legacy = attrs as unknown as Record<string, number>;
+  return clampGk({
+    diving: attrs.diving,
+    handling: attrs.handling,
+    reflexes: attrs.reflexes,
+    positioning: attrs.positioning,
+    kicking: attrs.kicking,
+    speed: legacy.command ?? 50,
   });
 }
 
@@ -137,22 +152,32 @@ export function clampGk(attrs: GKAttributes): GKAttributes {
     reflexes: c(attrs.reflexes),
     positioning: c(attrs.positioning),
     kicking: c(attrs.kicking),
-    command: c(attrs.command),
+    speed: c(attrs.speed),
   };
 }
 
-/** Migrate one dataset/career player if it still carries the legacy GK shape.
- *  Returns the (possibly) updated attributes; `overallChanged` signals the
- *  caller to recompute overallRating. */
+/** Migrate one dataset/career player if it still carries a legacy GK shape
+ *  (outfield attributes, or the retired "command" key). Returns the (possibly)
+ *  updated attributes; `overallChanged` signals the caller to recompute
+ *  overallRating. */
 export function migratePlayerAttributes(
   position: PositionCode,
   attrs: PositionalAttributes,
 ): { attributes: PositionalAttributes; changed: boolean } {
-  if (position === "GK" && !isGKAttributes(attrs)) {
-    return {
-      attributes: migrateLegacyGkAttributes(attrs as PlayerAttributes),
-      changed: true,
-    };
+  if (position === "GK") {
+    if (!isGKAttributes(attrs)) {
+      return {
+        attributes: migrateLegacyGkAttributes(attrs as PlayerAttributes),
+        changed: true,
+      };
+    }
+    // legacy command-keyed GK shape → rename command to speed
+    if (!("speed" in attrs) && "command" in (attrs as unknown as Record<string, unknown>)) {
+      return {
+        attributes: migrateCommandToSpeed(attrs),
+        changed: true,
+      };
+    }
   }
   return { attributes: attrs, changed: false };
 }
@@ -166,7 +191,7 @@ export const GK_OVR_WEIGHTS: Partial<Record<GkAttrKey, number>> = {
   positioning: 0.18,
   handling: 0.14,
   kicking: 0.1,
-  command: 0.06,
+  speed: 0.06,
 };
 
 /** Outfield weights per position — GK row only serves legacy saves whose

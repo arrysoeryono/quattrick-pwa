@@ -4,13 +4,14 @@ import { create } from "zustand";
 import type { Dataset, Difficulty, GameState, MatchResult, MatchTeamConfig } from "@/lib/game/types";
 import {
   getGameDb,
+  getDatasetSource,
   loadActiveDataset,
   listSaves,
   persistActiveDataset,
   putSave,
 } from "@/lib/game/dexie";
 import { createCareerState, advanceAfterUserMatch, buyPlayer, sellPlayer, refreshLineup, migrateGameState, type AdvanceOutcome } from "@/lib/game/advance";
-import { generateDefaultDataset } from "@/lib/game/defaultData";
+import { EMPTY_DATASET } from "@/lib/game/defaultData";
 import { computeOverall, migratePlayerAttributes } from "@/lib/game/attributes";
 import { MatchRunner, type TickPayload } from "@/lib/game/matchEngine";
 import type { LiveMatchSnapshot } from "@/lib/game/types";
@@ -251,14 +252,18 @@ export const useAppStore = create<AppStore>((set, get) => {
         } catch {
           /* offline — fall through to cache */
         }
-        // 2) offline fallback: last cached dataset
+        // 2) offline fallback: last cached dataset (never resurrect stale
+        //    "builtin" rows — the builtin dummy world no longer exists)
         if (!dataset) {
-          dataset = await loadActiveDataset().catch(() => null);
-          source = dataset ? "cache" : null;
+          const cachedSource = await getDatasetSource().catch(() => null);
+          if (cachedSource && cachedSource !== "builtin") {
+            dataset = await loadActiveDataset().catch(() => null);
+            source = dataset ? "cache" : null;
+          }
         }
-        // 3) last resort: builtin
+        // 3) last resort: empty world until an Excel database is imported
         if (!dataset) {
-          dataset = generateDefaultDataset();
+          dataset = EMPTY_DATASET;
           source = "builtin";
           await persistActiveDataset(dataset, "builtin").catch(() => undefined);
         }
@@ -389,7 +394,7 @@ export const useAppStore = create<AppStore>((set, get) => {
         }
       }
       if (!dataset) {
-        dataset = generateDefaultDataset();
+        dataset = EMPTY_DATASET;
         source = "builtin";
       }
       await persistActiveDataset(dataset, source).catch(() => undefined);

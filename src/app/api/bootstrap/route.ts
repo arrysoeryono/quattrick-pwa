@@ -5,7 +5,7 @@ import { neon } from "@neondatabase/serverless";
 import { asc } from "drizzle-orm";
 import { leagues, players, teams } from "@/lib/db/schema";
 import type { Dataset } from "@/lib/game/types";
-import { generateDefaultDataset } from "@/lib/game/defaultData";
+import { EMPTY_DATASET } from "@/lib/game/defaultData";
 import { computeOverall, migratePlayerAttributes } from "@/lib/game/attributes";
 
 export const dynamic = "force-dynamic";
@@ -63,5 +63,5 @@ export async function GET() {
       /* fall through to builtin */
     }
   }
-  return NextResponse.json({ dataset: generateDefaultDataset(), source: "builtin" });
+  return NextResponse.json({ dataset: EMPTY_DATASET, source: "builtin" });
 }

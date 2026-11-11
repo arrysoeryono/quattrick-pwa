@@ -351,11 +351,11 @@ function endSeason(game: GameState, dataset: Dataset): { summary: NonNullable<Ad
     const aged: PlayerRow = { ...p, age: p.age + 1 };
     if (aged.age >= 31) {
       if (aged.position === "GK" && "reflexes" in aged.attributes) {
-        // keepers age in reflexes & reach, not sprint speed
+        // keepers age in reflexes & mobility, not distribution
         aged.attributes = {
           ...aged.attributes,
           reflexes: Math.max(20, aged.attributes.reflexes - 2),
-          kicking: Math.max(20, aged.attributes.kicking - 1),
+          speed: Math.max(20, aged.attributes.speed - 1),
         };
       } else {
         aged.attributes = {

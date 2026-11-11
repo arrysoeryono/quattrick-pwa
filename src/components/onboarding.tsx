@@ -5,7 +5,8 @@ import { useAppStore } from "@/lib/store/gameStore";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Cloud, CloudOff, Play, Trash2, Trophy, UserRound } from "lucide-react";
+import { DatabaseManagerModal } from "@/components/database-manager-modal";
+import { Cloud, CloudOff, Database, Play, Trash2, Trophy, UserRound } from "lucide-react";
 import { formatDate } from "@/lib/format";
 import { DIFFICULTY_META, type Difficulty } from "@/lib/game/types";
 import { cn } from "@/lib/utils";
@@ -25,12 +26,14 @@ export function OnboardingScreen() {
   const startCareer = useAppStore((s) => s.startCareer);
   const continueSave = useAppStore((s) => s.continueSave);
   const removeSave = useAppStore((s) => s.removeSave);
+  const importDataset = useAppStore((s) => s.importDataset);
   const cloudOnline = useAppStore((s) => s.cloudOnline);
 
   const [managerName, setManagerName] = useState("");
   const [selectedClub, setSelectedClub] = useState<number | null>(null);
   const [difficulty, setDifficulty] = useState<Difficulty>("pro");
   const [starting, setStarting] = useState(false);
+  const [dbModal, setDbModal] = useState(false);
 
   const teams = useMemo(() => {
     const list = [...(dataset?.teams ?? [])];
@@ -153,42 +156,62 @@ export function OnboardingScreen() {
                 ))}
               </div>
               <p className="text-xs text-slate-500 mt-3 mb-2">Choose your club</p>
-              <div className="space-y-2">
-                {teams.map((t) => {
-                  const selected = selectedClub === t.id;
-                  return (
-                    <button
-                      key={t.id}
-                      type="button"
-                      onClick={() => setSelectedClub(t.id)}
-                      aria-pressed={selected}
-                      className={`w-full flex items-center gap-3 rounded-xl border p-3 text-left transition-colors ${
-                        selected
-                          ? "border-emerald-500/60 bg-emerald-500/10"
-                          : "border-slate-800 bg-slate-900 hover:border-slate-700"
-                      }`}
-                    >
-                      <div className={`h-9 w-9 shrink-0 rounded-lg ${crestColor(t.id)} flex items-center justify-center text-[10px] font-black text-white`}>
-                        {t.shortName}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-semibold text-slate-100 truncate">{t.name}</p>
-                        <p className="text-xs text-slate-500">
-                          Reputation {t.reputation} · ${(t.transferBudget / 1e6).toFixed(0)}M budget
-                        </p>
-                      </div>
-                      <div className="flex gap-0.5" aria-label={`Reputation ${t.reputation} of 100`}>
-                        {[80, 70, 60, 55].map((threshold) => (
-                          <span
-                            key={threshold}
-                            className={`h-1.5 w-4 rounded-full ${t.reputation >= threshold ? "bg-emerald-400" : "bg-slate-700"}`}
-                          />
-                        ))}
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
+              {teams.length === 0 ? (
+                <div className="rounded-xl border border-dashed border-slate-700 bg-slate-950/60 p-5 text-center">
+                  <div className="mx-auto h-11 w-11 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center">
+                    <Database className="h-5 w-5 text-emerald-400" aria-hidden />
+                  </div>
+                  <p className="mt-3 text-sm font-semibold text-slate-100">No database yet</p>
+                  <p className="mt-1 text-xs text-slate-500 leading-relaxed">
+                    There are no leagues, teams or players. Import your own
+                    Excel database (.xlsx) to build the world, then start a career.
+                  </p>
+                  <Button
+                    className="mt-3 w-full h-10 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold"
+                    onClick={() => setDbModal(true)}
+                  >
+                    <Database className="h-4 w-4 mr-2" aria-hidden />
+                    Open Database Manager
+                  </Button>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {teams.map((t) => {
+                    const selected = selectedClub === t.id;
+                    return (
+                      <button
+                        key={t.id}
+                        type="button"
+                        onClick={() => setSelectedClub(t.id)}
+                        aria-pressed={selected}
+                        className={`w-full flex items-center gap-3 rounded-xl border p-3 text-left transition-colors ${
+                          selected
+                            ? "border-emerald-500/60 bg-emerald-500/10"
+                            : "border-slate-800 bg-slate-900 hover:border-slate-700"
+                        }`}
+                      >
+                        <div className={`h-9 w-9 shrink-0 rounded-lg ${crestColor(t.id)} flex items-center justify-center text-[10px] font-black text-white`}>
+                          {t.shortName}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-semibold text-slate-100 truncate">{t.name}</p>
+                          <p className="text-xs text-slate-500">
+                            Reputation {t.reputation} · ${(t.transferBudget / 1e6).toFixed(0)}M budget
+                          </p>
+                        </div>
+                        <div className="flex gap-0.5" aria-label={`Reputation ${t.reputation} of 100`}>
+                          {[80, 70, 60, 55].map((threshold) => (
+                            <span
+                              key={threshold}
+                              className={`h-1.5 w-4 rounded-full ${t.reputation >= threshold ? "bg-emerald-400" : "bg-slate-700"}`}
+                            />
+                          ))}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
             </section>
 
             <div className="pb-6">
@@ -205,6 +228,16 @@ export function OnboardingScreen() {
             </div>
           </div>
         </div>
+
+        <DatabaseManagerModal
+          open={dbModal}
+          onOpenChange={setDbModal}
+          currentDataset={dataset}
+          onImportComplete={(ds) => {
+            setSelectedClub(null);
+            void importDataset(ds, "excel");
+          }}
+        />
       </div>
     </div>
   );

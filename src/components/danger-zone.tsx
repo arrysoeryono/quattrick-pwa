@@ -12,7 +12,6 @@ import { useAppStore } from "@/lib/store/gameStore";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
-import { generateDefaultDataset } from "@/lib/game/defaultData";
 import { cn } from "@/lib/utils";
 import {
   Cloud,
@@ -45,7 +44,6 @@ export function DangerZone() {
   const dataset = useAppStore((s) => s.dataset);
   const saves = useAppStore((s) => s.saves);
   const refreshSaves = useAppStore((s) => s.refreshSaves);
-  const importDataset = useAppStore((s) => s.importDataset);
   const resetAllData = useAppStore((s) => s.resetAllData);
 
   const [hidden, setHidden] = useState(false);
@@ -198,34 +196,6 @@ export function DangerZone() {
                     }}
                   >
                     Retire
-                  </AlertDialogAction>
-                </AlertDialogFooter>
-              </AlertDialogContent>
-            </AlertDialog>
-
-            <AlertDialog>
-              <AlertDialogTrigger asChild>
-                <Button variant="outline" className="w-full h-10 justify-start border-rose-500/40 bg-transparent text-rose-300 hover:bg-rose-500/10 hover:text-rose-200">
-                  <RefreshCw className="h-4 w-4 mr-2" aria-hidden />
-                  Regenerate world database
-                </Button>
-              </AlertDialogTrigger>
-              <AlertDialogContent className="max-w-[380px]">
-                <AlertDialogHeader>
-                  <AlertDialogTitle>Regenerate the player database?</AlertDialogTitle>
-                  <AlertDialogDescription>
-                    Builds a fresh 10-club world. Existing saves stay untouched.
-                  </AlertDialogDescription>
-                </AlertDialogHeader>
-                <AlertDialogFooter>
-                  <AlertDialogCancel>Cancel</AlertDialogCancel>
-                  <AlertDialogAction
-                    className="bg-rose-600 hover:bg-rose-500"
-                    onClick={() => {
-                      void importDataset(generateDefaultDataset(), "builtin");
-                    }}
-                  >
-                    Regenerate
                   </AlertDialogAction>
                 </AlertDialogFooter>
               </AlertDialogContent>

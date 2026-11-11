@@ -551,7 +551,7 @@ export function academyIntake(game: GameState, dataset: Dataset, nextId: number,
           reflexes: base + Math.floor(rng() * 10),
           positioning: base + Math.floor(rng() * 10),
           kicking: base + Math.floor(rng() * 10),
-          command: base + Math.floor(rng() * 10),
+          speed: base + Math.floor(rng() * 10),
         }
       : {
           pace: base + Math.floor(rng() * 10),

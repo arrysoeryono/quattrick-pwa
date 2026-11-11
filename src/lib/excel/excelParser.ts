@@ -433,6 +433,14 @@ function parsePlayers(
     // outfielders read the six outfield attributes (the other group may be empty)
     let attributes: PositionalAttributes;
     if (position === "GK") {
+      // legacy workbooks may still carry the retired "command" column — map it to speed
+      if (row["speed"] === undefined && row["command"] !== undefined) {
+        const cmd = coerceInt(row["command"]);
+        if (cmd !== null) {
+          row["speed"] = cmd;
+          ctx.warn(`Players row ${at}: player "${name}" (GK) legacy "command" column mapped to "speed"`);
+        }
+      }
       const gkAttrs = readAttrGroup(row, GK_ATTRIBUTE_KEYS, ctx, at, name, "goalkeeper", true);
       const legacyAttrs = gkAttrs ? null : readAttrGroup(row, OUTFIELD_ATTRIBUTE_KEYS, ctx, at, name, "legacy outfield", true);
       if (gkAttrs) {
@@ -443,7 +451,7 @@ function parsePlayers(
         attributes = migrateLegacyGkAttributes(legacyAttrs);
         overallRating = computeOverall(attributes, "GK");
       } else {
-        ctx.error(`Players row ${at}: player "${name}" (GK) missing goalkeeper attributes (diving, handling, reflexes, positioning, kicking, command), row skipped`);
+        ctx.error(`Players row ${at}: player "${name}" (GK) missing goalkeeper attributes (diving, handling, reflexes, positioning, kicking, speed), row skipped`);
         return;
       }
     } else {
