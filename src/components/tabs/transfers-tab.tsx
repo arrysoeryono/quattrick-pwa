@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { formatMoney, formatWage, posBadgeClass } from "@/lib/format";
 import { ALL_POSITIONS, type PlayerRow } from "@/lib/game/types";
@@ -176,20 +177,29 @@ export function TransfersTab() {
           <ArrowDownUp className="h-3 w-3 text-emerald-400" aria-hidden />
           {sortKey === "ovr" ? "Overall" : sortKey === "value" ? "Value" : sortKey === "potential" ? "Potential" : "Age"}
         </button>
-        {[null, 5000000, 15000000, 50000000].map((mp) => (
-          <button
-            key={String(mp)}
-            type="button"
-            onClick={() => setMaxPrice(mp)}
-            aria-pressed={maxPrice === mp}
+        <Select
+          value={maxPrice === null ? "any" : String(maxPrice)}
+          onValueChange={(v) => setMaxPrice(v === "any" ? null : Number(v))}
+        >
+          <SelectTrigger
+            size="sm"
+            aria-label="Maximum transfer price"
             className={cn(
-              "rounded-lg border px-3 min-h-[32px] text-[11px] font-semibold shrink-0",
-              maxPrice === mp ? "border-emerald-500/60 bg-emerald-500/10 text-emerald-400" : "border-slate-800 bg-slate-950/40 text-slate-400",
+              "flex-1 w-auto min-w-0 rounded-lg text-[11px] font-semibold",
+              maxPrice !== null
+                ? "border-emerald-500/60 bg-emerald-500/10 text-emerald-400"
+                : "border-slate-800 bg-slate-950/40 text-slate-400",
             )}
           >
-            {mp === null ? "Any price" : `≤ ${formatMoney(mp)}`}
-          </button>
-        ))}
+            <SelectValue placeholder="Price limit" />
+          </SelectTrigger>
+          <SelectContent className="border-slate-800 bg-slate-950 text-slate-200">
+            <SelectItem value="any" className="text-[11px]">Any price</SelectItem>
+            <SelectItem value="5000000" className="text-[11px]">≤ {formatMoney(5000000)}</SelectItem>
+            <SelectItem value="15000000" className="text-[11px]">≤ {formatMoney(15000000)}</SelectItem>
+            <SelectItem value="50000000" className="text-[11px]">≤ {formatMoney(50000000)}</SelectItem>
+          </SelectContent>
+        </Select>
       </div>
 
       {showFilters && (
