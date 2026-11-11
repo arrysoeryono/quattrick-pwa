@@ -1,0 +1,288 @@
+"use client";
+
+import { useMemo, useState } from "react";
+import { useAppStore } from "@/lib/store/gameStore";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { cn } from "@/lib/utils";
+import { formatMoney, formatWage, posBadgeClass } from "@/lib/format";
+import type { PlayerRow } from "@/lib/game/types";
+import { ArrowDownUp, BadgeCheck, Search } from "lucide-react";
+
+type GroupFilter = "ALL" | "GK" | "DEF" | "MID" | "ATT";
+type SortKey = "ovr" | "value" | "age" | "potential";
+
+const GROUPS: Record<Exclude<GroupFilter, "ALL">, string[]> = {
+  GK: ["GK"],
+  DEF: ["CB", "LB", "RB", "LWB", "RWB"],
+  MID: ["CDM", "CM", "CAM", "LM", "RM", "LAM", "RAM"],
+  ATT: ["LW", "RW", "LF", "RF", "CF", "ST"],
+};
+
+export function TransfersTab() {
+  const game = useAppStore((s) => s.game);
+  const dataset = useAppStore((s) => s.dataset);
+  const doBuyPlayer = useAppStore((s) => s.doBuyPlayer);
+  const doSellPlayer = useAppStore((s) => s.doSellPlayer);
+
+  const [filter, setFilter] = useState<GroupFilter>("ALL");
+  const [query, setQuery] = useState("");
+  const [sortKey, setSortKey] = useState<SortKey>("ovr");
+  const [maxPrice, setMaxPrice] = useState<number | null>(null);
+  const [target, setTarget] = useState<PlayerRow | null>(null);
+  const [selling, setSelling] = useState<PlayerRow | null>(null);
+  const [showAll, setShowAll] = useState(false);
+  const [buyError, setBuyError] = useState<string | null>(null);
+  const [buySuccess, setBuySuccess] = useState<string | null>(null);
+
+  const market = useMemo(() => {
+    if (!dataset || !game) return [];
+    let list = dataset.players.filter((p) => p.teamId !== game.clubId);
+    if (filter !== "ALL") list = list.filter((p) => GROUPS[filter].includes(p.position));
+    if (query.trim()) {
+      const q = query.trim().toLowerCase();
+      list = list.filter((p) => p.name.toLowerCase().includes(q));
+    }
+    if (maxPrice !== null) list = list.filter((p) => (p.teamId === -1 ? 0 : p.marketValue) <= maxPrice);
+    list.sort((a, b) => {
+      switch (sortKey) {
+        case "value": return b.marketValue - a.marketValue;
+        case "age": return a.age - b.age;
+        case "potential": return b.potential - a.potential;
+        default: return b.overallRating - a.overallRating;
+      }
+    });
+    return list;
+  }, [dataset, game, filter, query, sortKey, maxPrice]);
+
+  if (!game || !dataset) return null;
+  const visible = showAll ? market : market.slice(0, 40);
+  const mySquadSorted = [...game.players].sort((a, b) => b.overallRating - a.overallRating);
+
+  const teamLabel = (teamId: number) => {
+    if (teamId === -1) return "Free Agent";
+    return dataset.teams.find((t) => t.id === teamId)?.shortName ?? "???";
+  };
+
+  const confirmBuy = () => {
+    if (!target) return;
+    const res = doBuyPlayer(target.id);
+    setTarget(null);
+    if (!res.ok) {
+      setBuySuccess(null);
+      setBuyError(res.message);
+    } else {
+      setBuyError(null);
+      setBuySuccess(res.message);
+    }
+  };
+
+  const confirmSell = () => {
+    if (!selling) return;
+    const res = doSellPlayer(selling.id);
+    setSelling(null);
+    if (res.ok) {
+      setBuyError(null);
+      setBuySuccess(res.message);
+    }
+  };
+
+  return (
+    <div className="space-y-3">
+      {/* budget header */}
+      <section aria-label="Transfer budget" className="grid grid-cols-2 gap-2">
+        <div className="rounded-xl border border-slate-800 bg-slate-950/40 p-3">
+          <p className="text-[10px] uppercase tracking-wider text-slate-500">Transfer budget</p>
+          <p className="text-lg font-black text-emerald-400">{formatMoney(game.transferBudget)}</p>
+        </div>
+        <div className="rounded-xl border border-slate-800 bg-slate-950/40 p-3">
+          <p className="text-[10px] uppercase tracking-wider text-slate-500">Wage room / week</p>
+          <p className="text-lg font-black text-slate-200">
+            {formatMoney(Math.max(0, game.wageBudget - game.players.reduce((s, p) => s + p.salary, 0)))}
+          </p>
+        </div>
+      </section>
+
+      {buyError && (
+        <p role="alert" className="rounded-lg border border-rose-500/40 bg-rose-500/10 p-2.5 text-xs text-rose-300">{buyError}</p>
+      )}
+      {buySuccess && (
+        <p role="status" className="rounded-lg border border-emerald-500/40 bg-emerald-500/10 p-2.5 text-xs text-emerald-300">{buySuccess}</p>
+      )}
+
+      {/* search + filters */}
+      <div className="relative">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-500" aria-hidden />
+        <Input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search market..."
+          className="pl-9 bg-slate-950 border-slate-800"
+          aria-label="Search transfer market"
+        />
+      </div>
+
+      <div className="flex gap-1.5" role="group" aria-label="Position filter">
+        {(["ALL", "GK", "DEF", "MID", "ATT"] as GroupFilter[]).map((g) => (
+          <button
+            key={g}
+            type="button"
+            onClick={() => setFilter(g)}
+            aria-pressed={filter === g}
+            className={cn(
+              "flex-1 min-h-[36px] rounded-lg border text-xs font-semibold transition-colors",
+              filter === g ? "border-emerald-500/60 bg-emerald-500/10 text-emerald-400" : "border-slate-800 bg-slate-950/40 text-slate-400 hover:border-slate-700",
+            )}
+          >
+            {g}
+          </button>
+        ))}
+      </div>
+
+      <div className="flex gap-1.5 overflow-x-auto scrollbar-thin pb-1" role="group" aria-label="Sort and price filter">
+        <button
+          type="button"
+          onClick={() => setSortKey(sortKey === "ovr" ? "value" : sortKey === "value" ? "potential" : sortKey === "potential" ? "age" : "ovr")}
+          className="flex items-center gap-1 rounded-lg border border-slate-800 bg-slate-950/40 px-3 min-h-[32px] text-[11px] font-semibold text-slate-300 shrink-0"
+          aria-label="Cycle sort order"
+        >
+          <ArrowDownUp className="h-3 w-3 text-emerald-400" aria-hidden />
+          {sortKey === "ovr" ? "Overall" : sortKey === "value" ? "Value" : sortKey === "potential" ? "Potential" : "Age"}
+        </button>
+        {[null, 5000000, 15000000, 50000000].map((mp) => (
+          <button
+            key={String(mp)}
+            type="button"
+            onClick={() => setMaxPrice(mp)}
+            aria-pressed={maxPrice === mp}
+            className={cn(
+              "rounded-lg border px-3 min-h-[32px] text-[11px] font-semibold shrink-0",
+              maxPrice === mp ? "border-emerald-500/60 bg-emerald-500/10 text-emerald-400" : "border-slate-800 bg-slate-950/40 text-slate-400",
+            )}
+          >
+            {mp === null ? "Any price" : `≤ ${formatMoney(mp)}`}
+          </button>
+        ))}
+      </div>
+
+      {/* market list */}
+      <ScrollArea className="h-[calc(100vh-430px)] min-h-48 scrollbar-thin">
+        <ul className="space-y-1.5 pr-2" aria-label="Transfer market list">
+          {visible.map((p) => {
+            const price = p.teamId === -1 ? 0 : p.marketValue;
+            const affordable = price <= game.transferBudget;
+            return (
+              <li key={p.id} className="flex items-center gap-2.5 rounded-xl border border-slate-800 bg-slate-950/40 p-2.5">
+                <span className={cn("rounded-md border px-1.5 py-0.5 text-[10px] font-bold w-11 text-center shrink-0", posBadgeClass(p.position))}>
+                  {p.position}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold text-slate-100 truncate">{p.name}</p>
+                  <p className="text-[11px] text-slate-500">
+                    {teamLabel(p.teamId)} · Age {p.age} · {formatWage(p.salary)}
+                  </p>
+                </div>
+                <div className="text-right shrink-0 mr-1">
+                  <p className="text-base font-black text-slate-100 leading-none">{p.overallRating}</p>
+                  <p className="text-[10px] text-emerald-400 font-semibold">POT {p.potential}</p>
+                </div>
+                <Button
+                  size="sm"
+                  className="h-8 shrink-0 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold"
+                  onClick={() => setTarget(p)}
+                  aria-label={`Buy ${p.name} for ${formatMoney(price)}`}
+                >
+                  {price === 0 ? "Free" : formatMoney(price)}
+                </Button>
+              </li>
+            );
+          })}
+          {market.length === 0 && <li className="py-8 text-center text-xs text-slate-600">No players match your filters.</li>}
+        </ul>
+        {!showAll && market.length > 40 && (
+          <Button variant="outline" className="mt-2 w-full border-slate-700 text-slate-300" onClick={() => setShowAll(true)}>
+            Show all {market.length} players
+          </Button>
+        )}
+      </ScrollArea>
+
+      {/* my squad quick sell */}
+      <section aria-label="Sell players">
+        <h2 className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-2">Sell from squad (90% value)</h2>
+        <div className="flex gap-1.5 overflow-x-auto scrollbar-thin pb-1">
+          {mySquadSorted.map((p) => (
+            <button
+              key={p.id}
+              type="button"
+              onClick={() => setSelling(p)}
+              className="shrink-0 w-24 rounded-lg border border-slate-800 bg-slate-950/40 p-2 text-left hover:border-rose-500/50 transition-colors"
+              aria-label={`Sell ${p.name}`}
+            >
+              <p className="text-[11px] font-semibold text-slate-200 truncate">{p.name}</p>
+              <p className="text-[10px] text-slate-500">{p.position} · {p.overallRating} OVR</p>
+              <p className="text-[10px] font-bold text-amber-400">{formatMoney(Math.round(p.marketValue * 0.9))}</p>
+            </button>
+          ))}
+        </div>
+      </section>
+
+      {/* buy confirm dialog */}
+      <Dialog open={target !== null} onOpenChange={(o) => !o && setTarget(null)}>
+        <DialogContent className="max-w-[380px]">
+          {target && (
+            <>
+              <DialogHeader>
+                <DialogTitle className="text-left">Confirm transfer</DialogTitle>
+                <DialogDescription className="text-left">
+                  Sign <strong className="text-slate-200">{target.name}</strong> ({target.position}, OVR {target.overallRating}, POT {target.potential}) from {teamLabel(target.teamId)}.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="space-y-1.5 text-sm">
+                <div className="flex justify-between"><span className="text-slate-500">Fee</span><span className="font-bold text-slate-200">{target.teamId === -1 ? "Free transfer" : formatMoney(target.marketValue)}</span></div>
+                <div className="flex justify-between"><span className="text-slate-500">Weekly wage</span><span className="font-bold text-slate-200">{formatWage(target.salary)}</span></div>
+                <div className="flex justify-between"><span className="text-slate-500">Contract</span><span className="font-bold text-slate-200">3 years</span></div>
+              </div>
+              <div className="flex gap-2">
+                <Button variant="outline" className="flex-1 border-slate-700" onClick={() => setTarget(null)}>Cancel</Button>
+                <Button
+                  className="flex-1 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold"
+                  onClick={confirmBuy}
+                  disabled={(target.teamId === -1 ? 0 : target.marketValue) > game.transferBudget}
+                  aria-label="Confirm signing"
+                >
+                  <BadgeCheck className="h-4 w-4 mr-1.5" aria-hidden />
+                  Sign player
+                </Button>
+              </div>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* sell confirm dialog */}
+      <Dialog open={selling !== null} onOpenChange={(o) => !o && setSelling(null)}>
+        <DialogContent className="max-w-[380px]">
+          {selling && (
+            <>
+              <DialogHeader>
+                <DialogTitle className="text-left">Sell {selling.name}?</DialogTitle>
+                <DialogDescription className="text-left">
+                  You will receive {formatMoney(Math.round(selling.marketValue * 0.9))} (90% of {formatMoney(selling.marketValue)}). The player leaves immediately.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="flex gap-2">
+                <Button variant="outline" className="flex-1 border-slate-700" onClick={() => setSelling(null)}>Cancel</Button>
+                <Button variant="destructive" className="flex-1 font-bold" onClick={confirmSell} aria-label="Confirm sale">
+                  Sell player
+                </Button>
+              </div>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
