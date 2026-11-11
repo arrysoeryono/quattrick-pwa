@@ -3,6 +3,7 @@
 import { create } from "zustand";
 import type { Dataset, Difficulty, GameState, MatchResult, MatchTeamConfig, SaveRecord } from "@/lib/game/types";
 import {
+  getGameDb,
   loadActiveDataset,
   listSaves,
   persistActiveDataset,
@@ -50,6 +51,7 @@ interface AppStore {
   startCareer: (managerName: string, clubId: number, difficulty?: Difficulty) => Promise<void>;
   continueSave: (id: string) => Promise<void>;
   removeSave: (id: string) => Promise<void>;
+  resetAllData: () => Promise<void>;
   update: (mutator: (game: GameState) => void) => void;
   updateDataset: (mutator: (ds: Dataset) => void) => void;
   importDataset: (ds: Dataset, source: string) => Promise<void>;
@@ -171,6 +173,33 @@ export const useAppStore = create<AppStore>((set, get) => ({
     const saves = await listSaves().catch(() => []);
     const stillActive = get().saveId === id;
     set({ saves, ...(stillActive ? { game: null, saveId: null, phase: "onboarding" } : {}) });
+  },
+
+  /** Danger Zone — nuclear option: wipe every local save + the active dataset, restore factory state. */
+  resetAllData: async () => {
+    get().disposeRunner();
+    try {
+      const db = getGameDb();
+      await db.saves.clear();
+      await db.datasets.clear();
+    } catch {
+      /* IndexedDB unavailable — continue with in-memory reset */
+    }
+    const dataset = generateDefaultDataset();
+    await persistActiveDataset(dataset, "builtin").catch(() => undefined);
+    set({
+      dataset,
+      datasetSource: "builtin",
+      game: null,
+      saveId: null,
+      saves: [],
+      activeTab: "home",
+      phase: "onboarding",
+      liveFixtureId: null,
+      liveSnapshot: null,
+      liveResult: null,
+      lastAdvance: null,
+    });
   },
 
   update: (mutator) => {
