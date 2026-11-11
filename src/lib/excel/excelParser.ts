@@ -11,13 +11,16 @@
 import * as XLSX from "xlsx";
 import type {
   Dataset,
+  GKAttributes,
   LeagueRow,
   PlayerAttributes,
   PlayerRow,
   PositionCode,
+  PositionalAttributes,
   TeamRow,
 } from "@/lib/game/types";
 import { ALL_POSITIONS } from "@/lib/game/types";
+import { GK_ATTR_KEYS, OUTFIELD_ATTR_KEYS, computeOverall, migrateLegacyGkAttributes } from "@/lib/game/attributes";
 
 export interface ParseOutcome {
   leagues: LeagueRow[];
@@ -281,9 +284,46 @@ function parseTeams(
 
 // ── players ──────────────────────────────────────────────────────────────────
 
-const ATTRIBUTE_KEYS: readonly (keyof PlayerAttributes)[] = [
-  "pace", "shooting", "passing", "dribbling", "defending", "physical",
-];
+const OUTFIELD_ATTRIBUTE_KEYS: readonly (keyof PlayerAttributes)[] = [...OUTFIELD_ATTR_KEYS];
+const GK_ATTRIBUTE_KEYS: readonly (keyof GKAttributes)[] = [...GK_ATTR_KEYS];
+
+/** Reads one attribute group off the row. `lenient` skips missing cells
+ *  (returned as undefined) instead of hard-failing, so outfield rows may leave
+ *  GK columns empty and vice versa. */
+function readAttrGroup<T extends PlayerAttributes | GKAttributes>(
+  row: Record<string, unknown>,
+  keys: readonly (keyof T & string)[],
+  ctx: MessageCollector,
+  at: number,
+  playerName: string,
+  groupLabel: string,
+  lenient: boolean,
+): T | null {
+  const attrs = {} as Record<string, number>;
+  let missing: (keyof T & string)[] = [];
+  for (const key of keys) {
+    const value = coerceInt(row[key]);
+    if (value === null) {
+      missing.push(key);
+      continue;
+    }
+    if (value < 1 || value > 99) {
+      const clamped = clamp(value, 1, 99);
+      ctx.warn(`Players row ${at}: player "${playerName}" attribute "${key}" ${value} out of range 1-99, clamped to ${clamped}`);
+      attrs[key] = clamped;
+    } else {
+      attrs[key] = value;
+    }
+  }
+  if (missing.length > 0) {
+    if (lenient) return null; // group simply not filled in — caller decides
+    for (const key of missing) {
+      ctx.error(`Players row ${at}: player "${playerName}" missing ${groupLabel} attribute "${key}", row skipped`);
+    }
+    return null;
+  }
+  return attrs as unknown as T;
+}
 
 function parsePlayers(
   rows: Record<string, unknown>[],
@@ -389,24 +429,28 @@ function parsePlayers(
       salary = 0;
     }
 
-    const attributes = {} as PlayerAttributes;
-    let attributesValid = true;
-    for (const key of ATTRIBUTE_KEYS) {
-      const value = coerceInt(row[key]);
-      if (value === null) {
-        ctx.error(`Players row ${at}: player "${name}" missing attribute "${key}", row skipped`);
-        attributesValid = false;
-        break;
-      }
-      if (value < 1 || value > 99) {
-        const clamped = clamp(value, 1, 99);
-        ctx.warn(`Players row ${at}: player "${name}" attribute "${key}" ${value} out of range 1-99, clamped to ${clamped}`);
-        attributes[key] = clamped;
+    // attribute columns are position-dependent: keepers read the GK group,
+    // outfielders read the six outfield attributes (the other group may be empty)
+    let attributes: PositionalAttributes;
+    if (position === "GK") {
+      const gkAttrs = readAttrGroup(row, GK_ATTRIBUTE_KEYS, ctx, at, name, "goalkeeper", true);
+      const legacyAttrs = gkAttrs ? null : readAttrGroup(row, OUTFIELD_ATTRIBUTE_KEYS, ctx, at, name, "legacy outfield", true);
+      if (gkAttrs) {
+        attributes = gkAttrs;
+      } else if (legacyAttrs) {
+        // legacy tolerance: a GK row still using the old outfield columns is migrated
+        ctx.warn(`Players row ${at}: player "${name}" (GK) uses legacy outfield attribute columns - converted to the goalkeeper set`);
+        attributes = migrateLegacyGkAttributes(legacyAttrs);
+        overallRating = computeOverall(attributes, "GK");
       } else {
-        attributes[key] = value;
+        ctx.error(`Players row ${at}: player "${name}" (GK) missing goalkeeper attributes (diving, handling, reflexes, positioning, kicking, command), row skipped`);
+        return;
       }
+    } else {
+      const outfieldAttrs = readAttrGroup(row, OUTFIELD_ATTRIBUTE_KEYS, ctx, at, name, "outfield", false);
+      if (outfieldAttrs === null) return;
+      attributes = outfieldAttrs;
     }
-    if (!attributesValid) return;
 
     players.push({
       id,

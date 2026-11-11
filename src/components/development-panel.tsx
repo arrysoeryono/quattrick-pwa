@@ -13,6 +13,7 @@ import { Progress } from "@/components/ui/progress";
 import { COACH_LEVELS, coachMultiplier } from "@/lib/game/advance";
 import {
   FOCUS_POOL,
+  GK_FOCUS_POOL,
   INTENSITY_META,
   MENTOR_WEEKS,
   PLAYSTYLES,
@@ -28,6 +29,7 @@ import {
 } from "@/lib/game/development";
 import { getFormation } from "@/lib/game/formations";
 import { effectiveOvr } from "@/lib/game/tactics";
+import { isGKAttributes } from "@/lib/game/attributes";
 import { cn } from "@/lib/utils";
 import { Dumbbell, GraduationCap, GitBranch, Repeat, Star, Users } from "lucide-react";
 import type { PlayerState, TrainingFocus, TrainingIntensity } from "@/lib/game/types";
@@ -189,7 +191,7 @@ export function DevelopmentPanel({ player }: { player: PlayerState }) {
         </div>
         {player.trainingPlan?.focus !== "balanced" && (
           <p className="text-[10px] text-slate-600 mt-1.5">
-            Growth biased 70/30 into: {FOCUS_POOL[player.trainingPlan?.focus]?.join(", ")}
+            Growth biased 70/30 into: {(isGKAttributes(player.attributes) ? GK_FOCUS_POOL : FOCUS_POOL)[player.trainingPlan?.focus]?.join(", ")}
           </p>
         )}
         <div className="grid grid-cols-3 gap-1.5 mt-2" role="group" aria-label="Training intensity">

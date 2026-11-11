@@ -11,6 +11,7 @@ import {
 } from "@/lib/game/dexie";
 import { createCareerState, advanceAfterUserMatch, buyPlayer, sellPlayer, refreshLineup, migrateGameState, type AdvanceOutcome } from "@/lib/game/advance";
 import { generateDefaultDataset } from "@/lib/game/defaultData";
+import { computeOverall, migratePlayerAttributes } from "@/lib/game/attributes";
 import { MatchRunner, type TickPayload } from "@/lib/game/matchEngine";
 import type { LiveMatchSnapshot } from "@/lib/game/types";
 
@@ -44,6 +45,19 @@ function cacheSaves(metas: CloudSaveMeta[]): void {
   } catch {
     /* private mode */
   }
+}
+
+/** v4.5: goalkeepers carry their own attribute set. Cached datasets from an
+ *  older build may still hold outfield attributes on GK rows — migrate them. */
+function migrateDatasetGk(ds: Dataset): Dataset {
+  let changed = false;
+  const players = ds.players.map((p) => {
+    const mig = migratePlayerAttributes(p.position, p.attributes);
+    if (!mig.changed) return p;
+    changed = true;
+    return { ...p, attributes: mig.attributes, overallRating: computeOverall(mig.attributes, p.position) };
+  });
+  return changed ? { ...ds, players } : ds;
 }
 
 function readCachedSaves(): CloudSaveMeta[] {
@@ -248,6 +262,7 @@ export const useAppStore = create<AppStore>((set, get) => {
           source = "builtin";
           await persistActiveDataset(dataset, "builtin").catch(() => undefined);
         }
+        dataset = migrateDatasetGk(dataset);
 
         const saves = readCachedSaves();
         set({ dataset, datasetSource: source, saves, phase: "onboarding" });

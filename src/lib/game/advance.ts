@@ -14,7 +14,6 @@ import { getFormation } from "./formations";
 import {
   applySeasonDecay,
   autoSquadRole,
-  computeOverall,
   computePlayStyles,
   generateRegen,
   recalcPotential,
@@ -25,6 +24,7 @@ import {
   weeklyDevelopment,
 } from "./development";
 import { computeMarketValue, computeSalary, mulberry32 } from "./defaultData";
+import { attrValue, computeOverall, migratePlayerAttributes } from "./attributes";
 import { autoPickLineup } from "./tactics";
 import { defaultTactics, migrateTactics } from "./tacticPresets";
 import {
@@ -180,6 +180,12 @@ export function migrateGameState(raw: GameState): GameState {
     if (p.retrain === undefined) p.retrain = null;
     if (p.devPath === undefined) p.devPath = null;
     if (p.mentor === undefined) p.mentor = null;
+    // v4.5: goalkeepers now carry their own attribute set
+    const mig = migratePlayerAttributes(p.position, p.attributes);
+    if (mig.changed) {
+      p.attributes = mig.attributes;
+      p.overallRating = computeOverall(p.attributes, p.position);
+    }
   }
   if (game.difficulty === undefined) game.difficulty = "pro";
   if (game.boardConfidence === undefined) game.boardConfidence = 60;
@@ -344,11 +350,20 @@ function endSeason(game: GameState, dataset: Dataset): { summary: NonNullable<Ad
     }
     const aged: PlayerRow = { ...p, age: p.age + 1 };
     if (aged.age >= 31) {
-      aged.attributes = {
-        ...aged.attributes,
-        pace: Math.max(20, aged.attributes.pace - 2),
-        physical: Math.max(25, aged.attributes.physical - 2),
-      };
+      if (aged.position === "GK" && "reflexes" in aged.attributes) {
+        // keepers age in reflexes & reach, not sprint speed
+        aged.attributes = {
+          ...aged.attributes,
+          reflexes: Math.max(20, aged.attributes.reflexes - 2),
+          kicking: Math.max(20, aged.attributes.kicking - 1),
+        };
+      } else {
+        aged.attributes = {
+          ...aged.attributes,
+          pace: Math.max(20, attrValue(aged.attributes, "pace", 50) - 2),
+          physical: Math.max(25, attrValue(aged.attributes, "physical", 50) - 2),
+        };
+      }
       aged.overallRating = computeOverall(aged.attributes, aged.position);
       aged.marketValue = computeMarketValue(aged.overallRating, aged.age, aged.potential);
     }

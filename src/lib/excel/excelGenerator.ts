@@ -9,7 +9,7 @@
  */
 
 import * as XLSX from "xlsx";
-import type { Dataset, LeagueRow, PlayerRow, TeamRow } from "@/lib/game/types";
+import type { Dataset, GKAttributes, LeagueRow, PlayerAttributes, PlayerRow, TeamRow } from "@/lib/game/types";
 
 const TEMPLATE_FILENAME = "Quattrick_Database_Template.xlsx";
 
@@ -19,8 +19,11 @@ const INSTRUCTION_LINES: readonly string[] = [
   "1. Leagues sheet: id, name, country, tier (1 = top division)",
   "2. Teams sheet: id, league_id must match a league id, short_name max 5 chars",
   "3. Players sheet: position must be one of GK, CB, LB, LWB, RB, RWB, CDM, CM, CAM, LM, RM, LAM, RAM, LW, RW, LF, RF, CF, ST",
-  "Attribute columns (pace, shooting, passing, dribbling, defending, physical) must be integers 1-99",
-  "overall_rating is recomputed by the game engine but keep it realistic (average of attributes)",
+  "4. GOALKEEPERS (position = GK) use their own attribute columns:",
+  "   diving, handling, reflexes, positioning, kicking, command - leave the outfield columns empty",
+  "5. OUTFIELD players use: pace, shooting, passing, dribbling, defending, physical - leave the GK columns empty",
+  "Attribute values must be integers 1-99",
+  "overall_rating is recomputed by the game engine but keep it realistic (weighted average of attributes)",
   "potential >= overall_rating recommended",
   "market_value and salary are integers (salary = weekly wage)",
   "You may generate thousands of rows using Excel formulas or AI tools, then import the file in-game.",
@@ -34,10 +37,12 @@ const TEAM_HEADERS: readonly string[] = [
 ];
 const PLAYER_HEADERS: readonly string[] = [
   "id", "team_id", "name", "age", "position", "overall_rating", "potential",
-  "market_value", "salary", "pace", "shooting", "passing", "dribbling", "defending", "physical",
+  "market_value", "salary",
+  "pace", "shooting", "passing", "dribbling", "defending", "physical",
+  "diving", "handling", "reflexes", "positioning", "kicking", "command",
 ];
 
-type Cell = string | number;
+type Cell = string | number | null;
 type SheetAoa = Cell[][];
 
 const TEMPLATE_LEAGUES: LeagueRow[] = [
@@ -92,7 +97,7 @@ const TEMPLATE_PLAYERS: PlayerRow[] = [
     potential: 81,
     marketValue: 15000000,
     salary: 80000,
-    attributes: { pace: 55, shooting: 30, passing: 68, dribbling: 40, defending: 60, physical: 84 },
+    attributes: { diving: 84, handling: 80, reflexes: 82, positioning: 79, kicking: 68, command: 77 },
   },
 ];
 
@@ -109,11 +114,16 @@ function teamToRow(team: TeamRow): Cell[] {
 
 function playerToRow(player: PlayerRow): Cell[] {
   const a = player.attributes;
-  return [
+  const base = [
     player.id, player.teamId, player.name, player.age, player.position,
     player.overallRating, player.potential, player.marketValue, player.salary,
-    a.pace, a.shooting, a.passing, a.dribbling, a.defending, a.physical,
   ];
+  if (player.position === "GK" && "diving" in a) {
+    const gk = a as GKAttributes;
+    return [...base, null, null, null, null, null, null, gk.diving, gk.handling, gk.reflexes, gk.positioning, gk.kicking, gk.command];
+  }
+  const o = a as PlayerAttributes;
+  return [...base, o.pace ?? null, o.shooting ?? null, o.passing ?? null, o.dribbling ?? null, o.defending ?? null, o.physical ?? null, null, null, null, null, null, null];
 }
 
 function buildSheet(aoa: SheetAoa, widths: number[]): XLSX.WorkSheet {
@@ -140,7 +150,7 @@ function appendDatabaseSheets(
   const playerAoa: SheetAoa = [[...PLAYER_HEADERS], ...dataset.players.map(playerToRow)];
   XLSX.utils.book_append_sheet(
     wb,
-    buildSheet(playerAoa, [8, 10, 24, 8, 10, 12, 10, 14, 12, 8, 10, 10, 12, 12, 10]),
+    buildSheet(playerAoa, [8, 10, 24, 8, 10, 12, 10, 14, 12, 8, 10, 10, 12, 12, 10, 8, 10, 10, 12, 10, 10]),
     "Players",
   );
 }

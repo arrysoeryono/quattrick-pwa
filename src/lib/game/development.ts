@@ -1,6 +1,15 @@
-import type { PlayerAttributes, PlayerRow, PlayerState, PositionCode, SquadRole } from "./types";
+import type { PlayerRow, PlayerState, PositionCode, PositionalAttributes, SquadRole } from "./types";
 import { mulberry32, computeMarketValue, computeSalary } from "./defaultData";
 import { positionAffinity, positionGroup } from "./formations";
+import {
+  GK_ATTR_KEYS,
+  OUTFIELD_ATTR_KEYS,
+  computeOverall,
+  isGKAttributes,
+  type AttrKey,
+  type GkAttrKey,
+  type OutfieldAttrKey,
+} from "./attributes";
 
 /* ============================================================
  * DEVELOPMENT MECHANICS (per master spec v4.0)
@@ -32,10 +41,10 @@ export function sharpnessMorale(sharpness: number): "Very High" | "High" | "Neut
   return "Low";
 }
 
-export function keyAttributes(pos: PositionCode): (keyof PlayerAttributes)[] {
+export function keyAttributes(pos: PositionCode): AttrKey[] {
   const g = positionGroup(pos);
   switch (g) {
-    case "GK": return ["defending", "physical", "passing"];
+    case "GK": return ["reflexes", "diving", "positioning"];
     case "DEF": return ["defending", "physical", "pace"];
     case "MID": return ["passing", "dribbling", "physical"];
     case "ATT": return ["shooting", "pace", "dribbling"];
@@ -46,13 +55,23 @@ export function keyAttributes(pos: PositionCode): (keyof PlayerAttributes)[] {
 
 export const TRAINING_FOCUSES = ["balanced", "attacking", "defensive", "technical", "pace", "shooting"] as const;
 
-/** Attribute pool a focus biases growth toward. */
-export const FOCUS_POOL: Record<string, (keyof PlayerAttributes)[]> = {
+/** Attribute pool a focus biases growth toward (outfield players). */
+export const FOCUS_POOL: Record<string, OutfieldAttrKey[]> = {
   attacking: ["shooting", "dribbling", "pace"],
   defensive: ["defending", "physical"],
   technical: ["passing", "dribbling"],
   pace: ["pace", "physical"],
   shooting: ["shooting", "pace"],
+};
+
+/** Same focuses, keeper-flavoured pools. */
+export const GK_FOCUS_POOL: Record<string, GkAttrKey[]> = {
+  balanced: ["diving", "handling", "reflexes", "positioning", "kicking", "command"],
+  attacking: ["kicking", "command"],
+  defensive: ["diving", "handling"],
+  technical: ["kicking", "handling"],
+  pace: ["reflexes", "diving"],
+  shooting: ["positioning", "reflexes"],
 };
 
 export const INTENSITY_META = {
@@ -73,7 +92,7 @@ export interface DevPathDef {
   id: string;
   name: string;
   desc: string;
-  attrs: (keyof PlayerAttributes)[];
+  attrs: AttrKey[];
   groups: ("GK" | "DEF" | "MID" | "ATT")[];
 }
 
@@ -87,8 +106,8 @@ export const DEV_PATHS: DevPathDef[] = [
   { id: "stopper", name: "Stopper", desc: "Aggressive, dominant, wins every duel.", attrs: ["physical", "defending"], groups: ["DEF"] },
   { id: "ball-player", name: "Ball-Playing Defender", desc: "Steps out and starts attacks from the back.", attrs: ["passing", "defending"], groups: ["DEF"] },
   { id: "speedster", name: "Speedster", desc: "Recovery pace to burn. Nothing gets behind.", attrs: ["pace", "defending"], groups: ["DEF"] },
-  { id: "shot-stopper", name: "Shot Stopper", desc: "Reflex saves, commands his six-yard box.", attrs: ["physical", "defending"], groups: ["GK"] },
-  { id: "sweeper-keeper", name: "Sweeper Keeper", desc: "Distribution and footwork. An eleventh outfielder.", attrs: ["passing", "pace"], groups: ["GK"] },
+  { id: "shot-stopper", name: "Shot Stopper", desc: "Reflex saves, commands his six-yard box.", attrs: ["reflexes", "diving"], groups: ["GK"] },
+  { id: "sweeper-keeper", name: "Sweeper Keeper", desc: "Distribution and footwork. An eleventh outfielder.", attrs: ["kicking", "command"], groups: ["GK"] },
 ];
 
 export function devPathsFor(player: { position: PositionCode }): DevPathDef[] {
@@ -129,24 +148,28 @@ export function weeklyDevelopment(
     // Convert XP into attribute points probabilistically (1 attribute tick = 1 point)
     const chance = Math.min(0.95, xp / 3.2);
     if (rng() < chance) {
-      const attrs: (keyof PlayerAttributes)[] = ["pace", "shooting", "passing", "dribbling", "defending", "physical"];
-      const focusPool = FOCUS_POOL[plan.focus];
+      const gkShape = isGKAttributes(player.attributes);
+      const general: AttrKey[] = gkShape ? [...GK_ATTR_KEYS] : [...OUTFIELD_ATTR_KEYS];
+      const focusPool = (gkShape ? GK_FOCUS_POOL : FOCUS_POOL)[plan.focus];
       const path = player.devPath ? DEV_PATHS.find((d) => d.id === player.devPath) : null;
-      let pool: (keyof PlayerAttributes)[];
+      let pool: AttrKey[];
       if (path && rng() < 0.55) {
-        // evolution path dominates half the growth signals
-        pool = [path.attrs[Math.floor(rng() * path.attrs.length)]];
+        // evolution path dominates half the growth signals — keep path attrs
+        // compatible with the player's attribute shape
+        const pathAttrs = path.attrs.filter((a) => a in player.attributes);
+        pool = (pathAttrs.length ? pathAttrs : path.attrs) as AttrKey[];
       } else if (plan.focus === "balanced" || !focusPool) {
         // balanced: weigh toward the position's key attributes
         const key = keyAttributes(player.position);
-        pool = rng() < 0.65 ? key : attrs;
+        pool = rng() < 0.65 ? key : general;
       } else {
         // focused plan: 70% into the focus attributes, 30% general
-        pool = rng() < 0.7 ? focusPool : attrs;
+        pool = rng() < 0.7 ? focusPool : general;
       }
       const attr = pool[Math.floor(rng() * pool.length)];
-      if (player.attributes[attr] < 99) {
-        player.attributes = { ...player.attributes, [attr]: player.attributes[attr] + 1 };
+      const cur = (player.attributes as unknown as Record<string, number>)[attr];
+      if (cur !== undefined && cur < 99) {
+        player.attributes = { ...player.attributes, [attr]: cur + 1 } as PositionalAttributes;
         recomputeOverall(player);
       }
     }
@@ -178,8 +201,10 @@ export function tickMentorship(mentee: PlayerState, mentor: PlayerState | null, 
   if (rng() < 0.3) {
     const keys = keyAttributes(mentor.position);
     const attr = keys[Math.floor(rng() * keys.length)];
-    if (mentee.attributes[attr] < Math.min(99, mentor.attributes[attr])) {
-      mentee.attributes = { ...mentee.attributes, [attr]: mentee.attributes[attr] + 1 };
+    const menteeVal = (mentee.attributes as unknown as Record<string, number>)[attr];
+    const mentorVal = (mentor.attributes as unknown as Record<string, number>)[attr];
+    if (menteeVal !== undefined && mentorVal !== undefined && menteeVal < Math.min(99, mentorVal)) {
+      mentee.attributes = { ...mentee.attributes, [attr]: menteeVal + 1 } as PositionalAttributes;
       recomputeOverall(mentee);
     }
   }
@@ -190,40 +215,11 @@ export function tickMentorship(mentee: PlayerState, mentor: PlayerState | null, 
   return false;
 }
 
-const OVR_WEIGHTS: Record<PositionCode, Partial<Record<keyof PlayerAttributes, number>>> = {
-  GK: { defending: 0.5, physical: 0.2, passing: 0.15, pace: 0.1, dribbling: 0.05 },
-  CB: { defending: 0.4, physical: 0.25, pace: 0.15, passing: 0.12, dribbling: 0.08 },
-  LB: { defending: 0.25, pace: 0.25, physical: 0.15, passing: 0.2, dribbling: 0.15 },
-  RB: { defending: 0.25, pace: 0.25, physical: 0.15, passing: 0.2, dribbling: 0.15 },
-  LWB: { pace: 0.28, defending: 0.2, passing: 0.2, dribbling: 0.18, physical: 0.14 },
-  RWB: { pace: 0.28, defending: 0.2, passing: 0.2, dribbling: 0.18, physical: 0.14 },
-  CDM: { defending: 0.3, passing: 0.25, physical: 0.22, pace: 0.1, dribbling: 0.13 },
-  CM: { passing: 0.32, dribbling: 0.2, physical: 0.16, defending: 0.14, pace: 0.18 },
-  CAM: { passing: 0.3, dribbling: 0.3, shooting: 0.22, pace: 0.18 },
-  LM: { pace: 0.28, dribbling: 0.26, passing: 0.24, shooting: 0.12, physical: 0.1 },
-  RM: { pace: 0.28, dribbling: 0.26, passing: 0.24, shooting: 0.12, physical: 0.1 },
-  LAM: { passing: 0.28, dribbling: 0.3, shooting: 0.22, pace: 0.2 },
-  RAM: { passing: 0.28, dribbling: 0.3, shooting: 0.22, pace: 0.2 },
-  LW: { pace: 0.3, dribbling: 0.32, shooting: 0.2, passing: 0.18 },
-  RW: { pace: 0.3, dribbling: 0.32, shooting: 0.2, passing: 0.18 },
-  LF: { shooting: 0.28, dribbling: 0.3, pace: 0.24, passing: 0.18 },
-  RF: { shooting: 0.28, dribbling: 0.3, pace: 0.24, passing: 0.18 },
-  CF: { shooting: 0.34, dribbling: 0.26, pace: 0.2, physical: 0.12, passing: 0.08 },
-  ST: { shooting: 0.4, pace: 0.24, dribbling: 0.18, physical: 0.18 },
-};
+// OVR weight tables & computeOverall live in ./attributes (single source of
+// truth shared with the data generator and parsers).
+export { computeOverall, GK_OVR_WEIGHTS, OUTFIELD_OVR_WEIGHTS } from "./attributes";
 
-export function computeOverall(attrs: PlayerAttributes, pos: PositionCode): number {
-  const w = OVR_WEIGHTS[pos];
-  let sum = 0, total = 0;
-  (Object.keys(attrs) as (keyof PlayerAttributes)[]).forEach((k) => {
-    const weight = w[k] ?? 0.1;
-    sum += attrs[k] * weight;
-    total += weight;
-  });
-  return Math.round(sum / total);
-}
-
-export function recomputeOverall(player: { attributes: PlayerAttributes; position: PositionCode; overallRating: number }): void {
+export function recomputeOverall(player: { attributes: PositionalAttributes; position: PositionCode; overallRating: number }): void {
   player.overallRating = computeOverall(player.attributes, player.position);
 }
 
@@ -297,9 +293,9 @@ export interface PlayStyleDef {
   id: string;
   name: string;
   desc: string;
-  attr: keyof PlayerAttributes;
+  attr: OutfieldAttrKey;
   /** secondary attribute gate for styles built on a combo */
-  alt?: keyof PlayerAttributes;
+  alt?: OutfieldAttrKey;
 }
 
 export const PLAYSTYLES: PlayStyleDef[] = [
@@ -312,8 +308,10 @@ export const PLAYSTYLES: PlayStyleDef[] = [
   { id: "engine", name: "Engine", desc: "Endless stamina across both penalty areas.", attr: "pace", alt: "physical" },
 ];
 
-/** Standard badge at 80+, plus-version at 85+ with OVR 85 / POT 90 (master spec). */
-export function computePlayStyles(p: { attributes: PlayerAttributes; overallRating: number; potential: number }): { id: string; name: string; plus: boolean }[] {
+/** Standard badge at 80+, plus-version at 85+ with OVR 85 / POT 90 (master spec).
+ *  Keepers earn no outfield PlayStyles — their craft is rated by keeper quality. */
+export function computePlayStyles(p: { attributes: PositionalAttributes; overallRating: number; potential: number }): { id: string; name: string; plus: boolean }[] {
+  if (isGKAttributes(p.attributes)) return [];
   const plusEligible = p.overallRating >= 85 && p.potential >= 90;
   const out: { id: string; name: string; plus: boolean }[] = [];
   for (const s of PLAYSTYLES) {
@@ -331,6 +329,24 @@ export function applySeasonDecay(player: PlayerState, rng: () => number = Math.r
   if (player.age < 31) return;
   const intensity = player.age - 30; // 1,2,3...
   const decline = (n: number) => Math.max(1, Math.round(n * (0.7 + rng() * 0.6)));
+  if (isGKAttributes(player.attributes)) {
+    // keepers fade later in the core skills; reflexes go first, distribution slowest
+    const reflexDrop = decline(intensity * 1.2);
+    const divingDrop = decline(intensity * 0.9);
+    const commandDrop = decline(intensity * 0.5);
+    const kickDrop = rng() < 0.4 ? decline(intensity * 0.35) : 0;
+    player.attributes = {
+      ...player.attributes,
+      reflexes: Math.max(20, player.attributes.reflexes - reflexDrop),
+      diving: Math.max(20, player.attributes.diving - divingDrop),
+      handling: Math.max(20, player.attributes.handling - Math.round(reflexDrop * 0.4)),
+      positioning: Math.max(20, player.attributes.positioning - commandDrop),
+      command: Math.max(20, player.attributes.command - commandDrop),
+      kicking: Math.max(20, player.attributes.kicking - kickDrop),
+    };
+    recomputeOverall(player);
+    return;
+  }
   // Priority: pace first, then physical, technical slowest
   const paceDrop = decline(intensity * 1.6);
   const physDrop = decline(intensity * 1.1);
@@ -358,14 +374,23 @@ export function shouldRetire(player: { age: number; position: PositionCode; over
 export function generateRegen(retired: PlayerRow, newId: number, rng: () => number = mulberry32(Date.now() & 0xffffffff)): PlayerRow {
   const age = 16 + Math.floor(rng() * 3); // 16-18
   const pos = retired.position;
-  const attrs: PlayerAttributes = {
-    pace: 45 + Math.floor(rng() * 25),
-    shooting: 40 + Math.floor(rng() * 25),
-    passing: 42 + Math.floor(rng() * 25),
-    dribbling: 44 + Math.floor(rng() * 25),
-    defending: 38 + Math.floor(rng() * 28),
-    physical: 42 + Math.floor(rng() * 25),
-  };
+  const attrs: PositionalAttributes = pos === "GK"
+    ? {
+        diving: 45 + Math.floor(rng() * 25),
+        handling: 44 + Math.floor(rng() * 25),
+        reflexes: 46 + Math.floor(rng() * 25),
+        positioning: 42 + Math.floor(rng() * 25),
+        kicking: 40 + Math.floor(rng() * 25),
+        command: 40 + Math.floor(rng() * 25),
+      }
+    : {
+        pace: 45 + Math.floor(rng() * 25),
+        shooting: 40 + Math.floor(rng() * 25),
+        passing: 42 + Math.floor(rng() * 25),
+        dribbling: 44 + Math.floor(rng() * 25),
+        defending: 38 + Math.floor(rng() * 28),
+        physical: 42 + Math.floor(rng() * 25),
+      };
   const ovr = computeOverall(attrs, pos);
   const potential = Math.min(94, Math.max(retired.potential - 6, ovr + 8 + Math.floor(rng() * 18)));
   const firstNames = ["Kai", "Noel", "Rui", "Milo", "Ezra", "Tye", "Idris", "Louie", "Sacha", "Rasmus"];

@@ -51,7 +51,7 @@ export async function GET() {
     const wsPlayers = XLSX.utils.json_to_sheet(
       ps.map((p) => {
         const a = (p.attributes ?? {}) as Record<string, number>;
-        return {
+        const base = {
           id: p.id,
           team_id: p.teamId,
           name: p.name,
@@ -61,18 +61,37 @@ export async function GET() {
           potential: p.potential,
           market_value: Number(p.marketValue),
           salary: Number(p.salary),
+        };
+        if (p.position === "GK") {
+          // keepers export the dedicated GK attribute columns
+          return {
+            ...base,
+            pace: null, shooting: null, passing: null, dribbling: null, defending: null, physical: null,
+            diving: a.diving ?? 50,
+            handling: a.handling ?? 50,
+            reflexes: a.reflexes ?? 50,
+            positioning: a.positioning ?? 50,
+            kicking: a.kicking ?? 50,
+            command: a.command ?? 50,
+          };
+        }
+        return {
+          ...base,
           pace: a.pace ?? 50,
           shooting: a.shooting ?? 50,
           passing: a.passing ?? 50,
           dribbling: a.dribbling ?? 50,
           defending: a.defending ?? 50,
           physical: a.physical ?? 50,
+          diving: null, handling: null, reflexes: null, positioning: null, kicking: null, command: null,
         };
       }),
       {
         header: [
           "id", "team_id", "name", "age", "position", "overall_rating", "potential",
-          "market_value", "salary", "pace", "shooting", "passing", "dribbling", "defending", "physical",
+          "market_value", "salary",
+          "pace", "shooting", "passing", "dribbling", "defending", "physical",
+          "diving", "handling", "reflexes", "positioning", "kicking", "command",
         ],
       },
     );

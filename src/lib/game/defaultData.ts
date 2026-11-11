@@ -1,4 +1,5 @@
-import type { Dataset, PlayerAttributes, PlayerRow, PositionCode, TeamRow } from "./types";
+import type { Dataset, GKAttributes, PlayerAttributes, PlayerRow, PositionCode, PositionalAttributes, TeamRow } from "./types";
+import { computeOverall } from "./attributes";
 
 /** Deterministic RNG so client fallback & server seed generate identical datasets. */
 export function mulberry32(seed: number): () => number {
@@ -64,9 +65,11 @@ const TEAM_SEEDS: TeamSeed[] = [
   { id: 110, name: "Crestwood Wanderers", shortName: "CSW", reputation: 55 },
 ];
 
-/** Position-specific attribute profiles: [pace, shooting, passing, dribbling, defending, physical] deltas from team mean. */
+/** Position-specific attribute profiles: deltas from team mean.
+ *  Outfield: [pace, shooting, passing, dribbling, defending, physical]
+ *  GK:       [diving, handling, reflexes, positioning, kicking, command] */
 const PROFILE: Record<PositionCode, [number, number, number, number, number, number]> = {
-  GK: [-18, -40, -8, -18, 8, 4],
+  GK: [6, 4, 6, 2, -12, 0],
   CB: [-6, -22, -4, -12, 10, 6],
   LB: [4, -16, 0, -4, 4, 0],
   RB: [4, -16, 0, -4, 4, 0],
@@ -89,11 +92,22 @@ const PROFILE: Record<PositionCode, [number, number, number, number, number, num
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, Math.round(v)));
 
-function genAttributes(rng: () => number, pos: PositionCode, mean: number): PlayerAttributes {
+function genAttributes(rng: () => number, pos: PositionCode, mean: number): PositionalAttributes {
   const p = PROFILE[pos];
   const jitter = () => (rng() - 0.5) * 11;
   const attrs = [0, 1, 2, 3, 4, 5].map((i) => clamp(mean + p[i] + jitter(), 20, 97));
-  return {
+  if (pos === "GK") {
+    const gk: GKAttributes = {
+      diving: attrs[0],
+      handling: attrs[1],
+      reflexes: attrs[2],
+      positioning: attrs[3],
+      kicking: attrs[4],
+      command: attrs[5],
+    };
+    return gk;
+  }
+  const out: PlayerAttributes = {
     pace: attrs[0],
     shooting: attrs[1],
     passing: attrs[2],
@@ -101,10 +115,8 @@ function genAttributes(rng: () => number, pos: PositionCode, mean: number): Play
     defending: attrs[4],
     physical: attrs[5],
   };
+  return out;
 }
-
-const avg = (a: PlayerAttributes) =>
-  Math.round((a.pace + a.shooting + a.passing + a.dribbling + a.defending + a.physical) / 6);
 
 function ageFactorForValue(age: number): number {
   if (age <= 21) return 1.55;
@@ -185,7 +197,7 @@ export function generateDefaultDataset(seed = 20250712): Dataset {
         // squad depth dips slightly for the second string
         const depthPenalty = i > 0 && (pos === "GK" || pos === "LB" || pos === "RB" || pos === "LW" || pos === "RW") ? 3 : 0;
         const attrs = genAttributes(rng, pos, teamMean - depthPenalty + (rng() < 0.12 ? 4 : 0));
-        const ovr = avg(attrs);
+        const ovr = computeOverall(attrs, pos);
         let potential = ovr;
         if (age <= 21) potential = ovr + 5 + Math.floor(rng() * 10);
         else if (age <= 24) potential = ovr + 3 + Math.floor(rng() * 7);

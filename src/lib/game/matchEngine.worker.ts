@@ -11,6 +11,7 @@
  */
 import { getFormation, positionAffinity } from "./formations";
 import { NEUTRAL_SLIDERS } from "./tacticPresets";
+import { attrValue, gkSaveFactor } from "./attributes";
 import type {
   MatchEventLog,
   MatchRatingEntry,
@@ -320,17 +321,21 @@ function fill(tpl: string, p: SimPlayer): string {
 /* ---------- shot resolution ---------- */
 function resolveShot(att: TeamSim, def: TeamSim, shooter: SimPlayer, dist: number, angleDeg: number, pressure: number, xgMult = 1): void {
   const angleFactor = Math.sin((angleDeg * Math.PI) / 180);
-  const finishBonus = (1 + (shooter.attributes.shooting - 70) / 160) * att.mods.finish * (shooter.playStyles.has("clinical") ? 1.06 : 1);
+  const finishBonus = (1 + (attrValue(shooter.attributes, "shooting", 25) - 70) / 160) * att.mods.finish * (shooter.playStyles.has("clinical") ? 1.06 : 1);
   const xg = Math.max(0.015, Math.min(0.72, 1.15 * Math.exp(-dist / 9.2) * (0.35 + 0.65 * angleFactor) * pressure * finishBonus * xgMult));
+  // keeper quality shapes how much of that xG actually turns into goals
+  const gk = onPitch(def).find((p) => p.slot === "GK");
+  const saveFactor = gk && "diving" in gk.attributes ? gkSaveFactor(gk.attributes) : 1;
+  const effXg = Math.max(0.01, Math.min(0.85, xg * saveFactor));
   att.xg += xg;
   const roll = rng();
-  const scored = roll < xg;
+  const scored = roll < effXg;
   shotLog.push({ minute, side: att.side, xg: Math.round(xg * 100) / 100, scored, shooter: shooter.name });
   if (scored) {
     att.goals++; shooter.goals++; shooter.rating += 1.0;
     att.onTarget++;
     const assister = pickWeighted(onPitch(att).filter((p) => p.id !== shooter.id), (p) => {
-      let w = Math.pow(Math.max(1, p.attributes.passing * 0.7 + p.ovr * 0.3), 2);
+      let w = Math.pow(Math.max(1, attrValue(p.attributes, "passing", attrValue(p.attributes, "kicking", 40)) * 0.7 + p.ovr * 0.3), 2);
       if (p.playStyles.has("playmaker")) w *= 1.25;
       if (p.instr.att === "false-9" || p.instr.att === "free-roam") w *= 1.2;
       return w;
@@ -343,10 +348,9 @@ function resolveShot(att: TeamSim, def: TeamSim, shooter: SimPlayer, dist: numbe
     }
     for (const p of def.players) p.rating -= 0.04;
     for (const p of att.players) p.rating += 0.05;
-  } else if (roll < xg + 0.36) {
+  } else if (roll < effXg + 0.36) {
     att.onTarget++;
-    const gk = onPitch(def).find((p) => p.slot === "GK");
-    if (gk && rng() < 0.75) gk.rating += 0.12;
+    if (gk && rng() < 0.75) gk.rating += 0.12 + (1 - saveFactor) * 0.5;
     events.push({ minute, type: "save", teamSide: att.side, text: fill(SAVE_TXT[Math.floor(rng() * SAVE_TXT.length)].replace("{g}", gk?.name ?? "the keeper"), shooter) });
   } else {
     events.push({ minute, type: "miss", teamSide: att.side, text: fill(MISS_TXT[Math.floor(rng() * MISS_TXT.length)], shooter) });
@@ -395,7 +399,7 @@ function simulateMinute(): void {
     if (rng() < 0.035) {
       const taker =
         onPitch(att).find((p) => p.id === att.penaltyTaker) ??
-        pickWeighted(onPitch(att), (p) => (p.slot === "GK" ? 0.01 : Math.pow(Math.max(1, p.attributes.shooting), 2.4)));
+        pickWeighted(onPitch(att), (p) => (p.slot === "GK" ? 0.01 : Math.pow(Math.max(1, attrValue(p.attributes, "shooting", 20)), 2.4)));
       if (taker) {
         taker.shots++; att.shots++;
         events.push({ minute, type: "info", teamSide: att.side, text: `PENALTY to ${att.cfg.shortName}! ${taker.name} places the ball on the spot...` });
@@ -404,7 +408,7 @@ function simulateMinute(): void {
     } else {
       const shooter = pickWeighted(onPitch(att), (p) => {
         if (p.slot === "GK") return 0.01;
-        let w = Math.pow(Math.max(1, p.attributes.shooting * 0.6 + p.attributes.dribbling * 0.25 + p.ovr * 0.15), 2.2);
+        let w = Math.pow(Math.max(1, attrValue(p.attributes, "shooting", 20) * 0.6 + attrValue(p.attributes, "dribbling", 20) * 0.25 + p.ovr * 0.15), 2.2);
         const ia = p.instr.att;
         if (ia === "get-in-behind") w *= 1.4;
         if (ia === "cut-inside") w *= 1.2;

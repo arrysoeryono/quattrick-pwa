@@ -1,7 +1,7 @@
 import type { Dataset, Fixture, TableRow, TeamRow } from "./types";
 import { mulberry32 } from "./defaultData";
 import { getFormation, positionAffinity } from "./formations";
-import type { MatchTeamConfig, Mentality, PlayerState } from "./types";
+import type { MatchTeamConfig, Mentality, PlayerState, PositionCode } from "./types";
 import { aiSlidersFor } from "./tacticPresets";
 import { computePlayStyles } from "./development";
 
@@ -164,9 +164,12 @@ export function buildAiTeamConfig(dataset: Dataset, team: TeamRow, formationName
     }
     if (!pick) pick = squad[0];
     if (!pick) {
+      const fallbackAttrs = slot === "GK"
+        ? { diving: 50, handling: 50, reflexes: 50, positioning: 50, kicking: 50, command: 50 }
+        : { pace: 50, shooting: 50, passing: 50, dribbling: 50, defending: 50, physical: 50 };
       players.push({
-        id: -1, name: "Unknown", position: slot, ovr: 50,
-        attributes: { pace: 50, shooting: 50, passing: 50, dribbling: 50, defending: 50, physical: 50 },
+        id: -1, name: "Unknown", position: slot as PositionCode, ovr: 50,
+        attributes: fallbackAttrs,
         stamina: 100, sharpness: 70, morale: 60, age: 24,
       });
       return;

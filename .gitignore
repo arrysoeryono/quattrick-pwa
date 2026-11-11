@@ -59,3 +59,5 @@ download/
 
 # vercel
 .vercel
+# local uploads
+/upload/

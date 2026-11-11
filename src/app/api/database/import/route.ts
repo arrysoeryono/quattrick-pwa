@@ -4,8 +4,9 @@ import { getNeonUrl } from "@/lib/db/client";
 import { neon } from "@neondatabase/serverless";
 import { sql } from "drizzle-orm";
 import { leagues, players, teams } from "@/lib/db/schema";
-import type { Dataset } from "@/lib/game/types";
+import type { Dataset, GKAttributes, PlayerAttributes } from "@/lib/game/types";
 import { ALL_POSITIONS } from "@/lib/game/types";
+import { migrateLegacyGkAttributes } from "@/lib/game/attributes";
 
 export const dynamic = "force-dynamic";
 
@@ -17,6 +18,38 @@ interface ImportBody {
 }
 
 const isInt = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v) && Number.isInteger(v);
+
+const gkClamp = (v: unknown): number => Math.min(99, Math.max(1, Math.round(typeof v === "number" && Number.isFinite(v) ? v : 50)));
+
+/** Normalize incoming attributes to the position-correct shape.
+ *  GK rows may still carry the legacy outfield set - those get migrated. */
+function normalizeAttributes(position: string, raw: Record<string, unknown> | null | undefined): PlayerAttributes | GKAttributes {
+  const a = (raw ?? {}) as Record<string, unknown>;
+  if (position === "GK") {
+    const gk: GKAttributes = {
+      diving: gkClamp(a.diving),
+      handling: gkClamp(a.handling),
+      reflexes: gkClamp(a.reflexes),
+      positioning: gkClamp(a.positioning),
+      kicking: gkClamp(a.kicking),
+      command: gkClamp(a.command),
+    };
+    // legacy GK rows (old outfield columns, no GK columns) are converted
+    const hasGk = ["diving", "handling", "reflexes", "positioning", "kicking", "command"].some((k) => typeof a[k] === "number");
+    if (!hasGk && typeof a.pace === "number") {
+      return migrateLegacyGkAttributes(a as unknown as PlayerAttributes);
+    }
+    return gk;
+  }
+  return {
+    pace: gkClamp(a.pace),
+    shooting: gkClamp(a.shooting),
+    passing: gkClamp(a.passing),
+    dribbling: gkClamp(a.dribbling),
+    defending: gkClamp(a.defending),
+    physical: gkClamp(a.physical),
+  };
+}
 
 /** Bulk import from the Excel parser. Replace-mode: wipes & reinserts with explicit ids. */
 export async function POST(request: Request) {
@@ -61,25 +94,22 @@ export async function POST(request: Request) {
 
   const playerRows = inPlayers
     .filter((p) => isInt(p.id) && typeof p.name === "string" && p.name.length > 0 && isInt(p.age) && p.age >= 15 && p.age <= 45 && ALL_POSITIONS.includes(p.position))
-    .map((p) => ({
-      id: p.id,
-      teamId: teamIds.has(p.teamId) ? p.teamId : null,
-      name: String(p.name).slice(0, 100),
-      age: p.age,
-      position: p.position,
-      overallRating: Math.min(99, Math.max(1, isInt(p.overallRating) ? p.overallRating : 50)),
-      potential: Math.min(99, Math.max(1, isInt(p.potential) ? p.potential : p.overallRating ?? 50)),
-      marketValue: isInt(p.marketValue) ? p.marketValue : 0,
-      salary: isInt(p.salary) ? p.salary : 1000,
-      attributes: {
-        pace: Math.min(99, Math.max(1, Math.round(p.attributes?.pace ?? 50))),
-        shooting: Math.min(99, Math.max(1, Math.round(p.attributes?.shooting ?? 50))),
-        passing: Math.min(99, Math.max(1, Math.round(p.attributes?.passing ?? 50))),
-        dribbling: Math.min(99, Math.max(1, Math.round(p.attributes?.dribbling ?? 50))),
-        defending: Math.min(99, Math.max(1, Math.round(p.attributes?.defending ?? 50))),
-        physical: Math.min(99, Math.max(1, Math.round(p.attributes?.physical ?? 50))),
-      },
-    }));
+    .map((p) => {
+      const attrs = normalizeAttributes(p.position, p.attributes as unknown as Record<string, unknown>);
+      const overall = Math.min(99, Math.max(1, isInt(p.overallRating) ? p.overallRating : 50));
+      return {
+        id: p.id,
+        teamId: teamIds.has(p.teamId) ? p.teamId : null,
+        name: String(p.name).slice(0, 100),
+        age: p.age,
+        position: p.position,
+        overallRating: overall,
+        potential: Math.min(99, Math.max(1, isInt(p.potential) ? p.potential : overall)),
+        marketValue: isInt(p.marketValue) ? p.marketValue : 0,
+        salary: isInt(p.salary) ? p.salary : 1000,
+        attributes: attrs,
+      };
+    });
   if (playerRows.length !== inPlayers.length) errors.push(`${inPlayers.length - playerRows.length} player rows skipped`);
 
   if (leagueRows.length === 0 || teamRows.length === 0 || playerRows.length === 0) {

@@ -6,6 +6,7 @@ import { asc } from "drizzle-orm";
 import { leagues, players, teams } from "@/lib/db/schema";
 import type { Dataset } from "@/lib/game/types";
 import { generateDefaultDataset } from "@/lib/game/defaultData";
+import { computeOverall, migratePlayerAttributes } from "@/lib/game/attributes";
 
 export const dynamic = "force-dynamic";
 
@@ -33,18 +34,28 @@ export async function GET() {
             transferBudget: Number(t.transferBudget ?? 10000000),
             wageBudget: Number(t.wageBudget ?? 100000),
           })),
-          players: ps.map((p) => ({
-            id: p.id,
-            teamId: p.teamId ?? -1,
-            name: p.name,
-            age: p.age,
-            position: p.position as Dataset["players"][number]["position"],
-            overallRating: p.overallRating,
-            potential: p.potential,
-            marketValue: Number(p.marketValue),
-            salary: Number(p.salary),
-            attributes: p.attributes as Dataset["players"][number]["attributes"],
-          })),
+          players: ps.map((p) => {
+            // migrate legacy GK rows (outfield attribute set) to the GK shape
+            const mig = migratePlayerAttributes(
+              p.position as Dataset["players"][number]["position"],
+              p.attributes as Dataset["players"][number]["attributes"],
+            );
+            const attrs = mig.attributes;
+            return {
+              id: p.id,
+              teamId: p.teamId ?? -1,
+              name: p.name,
+              age: p.age,
+              position: p.position as Dataset["players"][number]["position"],
+              overallRating: mig.changed
+                ? computeOverall(attrs, p.position as Dataset["players"][number]["position"])
+                : p.overallRating,
+              potential: p.potential,
+              marketValue: Number(p.marketValue),
+              salary: Number(p.salary),
+              attributes: attrs,
+            };
+          }),
         };
         return NextResponse.json({ dataset, source: "neon" });
       }

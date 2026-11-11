@@ -14,6 +14,7 @@ import type {
   InboxMessage,
   NewsItem,
   PlayerState,
+  PositionalAttributes,
   SocialPost,
 } from "./types";
 import { computeMarketValue } from "./defaultData";
@@ -542,14 +543,24 @@ export function academyIntake(game: GameState, dataset: Dataset, nextId: number,
     const pos = positions[Math.floor(rng() * positions.length)] as PlayerState["position"];
     const age = 16 + Math.floor(rng() * 2);
     const base = 44 + Math.floor(rng() * 12) + game.facilityLevel * 2;
-    const attrs = {
-      pace: base + Math.floor(rng() * 10),
-      shooting: base + Math.floor(rng() * 10),
-      passing: base + Math.floor(rng() * 10),
-      dribbling: base + Math.floor(rng() * 10),
-      defending: base + Math.floor(rng() * 10),
-      physical: base + Math.floor(rng() * 10),
-    };
+    // keepers carry the dedicated GK attribute set
+    const attrs: PositionalAttributes = pos === "GK"
+      ? {
+          diving: base + Math.floor(rng() * 10),
+          handling: base + Math.floor(rng() * 10),
+          reflexes: base + Math.floor(rng() * 10),
+          positioning: base + Math.floor(rng() * 10),
+          kicking: base + Math.floor(rng() * 10),
+          command: base + Math.floor(rng() * 10),
+        }
+      : {
+          pace: base + Math.floor(rng() * 10),
+          shooting: base + Math.floor(rng() * 10),
+          passing: base + Math.floor(rng() * 10),
+          dribbling: base + Math.floor(rng() * 10),
+          defending: base + Math.floor(rng() * 10),
+          physical: base + Math.floor(rng() * 10),
+        };
     const { ovr, pot } = (() => {
       const o = computeOverall(attrs, pos);
       return { ovr: o, pot: Math.min(92, o + 14 + Math.floor(rng() * 14) + game.facilityLevel * 2) };

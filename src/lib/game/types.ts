@@ -4,6 +4,7 @@
  * speaks these plain-JSON shapes so saves stay serializable & portable.
  */
 
+/** Outfield players (every position except GK). */
 export interface PlayerAttributes {
   pace: number;
   shooting: number;
@@ -12,6 +13,19 @@ export interface PlayerAttributes {
   defending: number;
   physical: number;
 }
+
+/** Goalkeepers carry their own attribute set — see lib/game/attributes.ts. */
+export interface GKAttributes {
+  diving: number;
+  handling: number;
+  reflexes: number;
+  positioning: number;
+  kicking: number;
+  command: number;
+}
+
+/** Either attribute shape, depending on the player's position. */
+export type PositionalAttributes = PlayerAttributes | GKAttributes;
 
 export type PositionCode =
   | "GK" | "CB" | "LB" | "RB" | "LWB" | "RWB"
@@ -34,7 +48,7 @@ export interface PlayerRow {
   potential: number;
   marketValue: number;
   salary: number; // weekly wage
-  attributes: PlayerAttributes;
+  attributes: PositionalAttributes;
 }
 
 export interface LeagueRow {
@@ -380,7 +394,7 @@ export interface MatchTeamConfig {
     name: string;
     position: PositionCode;
     ovr: number;
-    attributes: PlayerAttributes;
+    attributes: PositionalAttributes;
     stamina: number;
     sharpness: number;
     morale: number;
