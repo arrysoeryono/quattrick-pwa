@@ -4,7 +4,6 @@ import { useMemo, useState } from "react";
 import { useAppStore } from "@/lib/store/gameStore";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
 import { PlayerDetailBody } from "@/components/player-detail";
@@ -90,8 +89,8 @@ export function SquadTab() {
         ))}
       </div>
 
-      <ScrollArea className="h-[calc(100vh-320px)] min-h-48 scrollbar-thin">
-        <ul className="space-y-1.5 pr-2" aria-label="Squad player list">
+      <div>
+        <ul className="space-y-1.5" aria-label="Squad player list">
           {squad.map((p) => (
             <li key={p.id}>
               <button
@@ -139,10 +138,10 @@ export function SquadTab() {
             <li className="py-8 text-center text-xs text-slate-600">No players match your filters.</li>
           )}
         </ul>
-      </ScrollArea>
+      </div>
 
       <Sheet open={selected !== null} onOpenChange={(o) => !o && setSelectedId(null)}>
-        <SheetContent side="bottom" className="max-h-[88vh] overflow-y-auto scrollbar-thin rounded-t-2xl border-slate-800 bg-slate-900 p-0">
+        <SheetContent side="bottom" className="max-h-[min(88dvh,88vh)] overflow-y-auto overscroll-contain scrollbar-thin touch-scroll rounded-t-2xl border-slate-800 bg-slate-900 p-0">
           {selected && (
             <>
               <SheetHeader className="px-4 pt-4 pb-2 border-b border-slate-800">

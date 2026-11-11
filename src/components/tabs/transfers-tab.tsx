@@ -5,7 +5,6 @@ import { useAppStore } from "@/lib/store/gameStore";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import { formatMoney, formatWage, posBadgeClass } from "@/lib/format";
@@ -169,8 +168,8 @@ export function TransfersTab() {
       </div>
 
       {/* market list */}
-      <ScrollArea className="h-[calc(100vh-430px)] min-h-48 scrollbar-thin">
-        <ul className="space-y-1.5 pr-2" aria-label="Transfer market list">
+      <div>
+        <ul className="space-y-1.5" aria-label="Transfer market list">
           {visible.map((p) => {
             const price = p.teamId === -1 ? 0 : p.marketValue;
             const affordable = price <= game.transferBudget;
@@ -207,7 +206,7 @@ export function TransfersTab() {
             Show all {market.length} players
           </Button>
         )}
-      </ScrollArea>
+      </div>
 
       {/* my squad quick sell */}
       <section aria-label="Sell players">

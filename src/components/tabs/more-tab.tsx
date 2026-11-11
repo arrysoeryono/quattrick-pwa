@@ -256,7 +256,7 @@ export function MoreTab() {
 
       {/* cloud saves sheet */}
       <Sheet open={cloudSheet} onOpenChange={setCloudSheet}>
-        <SheetContent side="bottom" className="max-h-[70vh] overflow-y-auto scrollbar-thin rounded-t-2xl border-slate-800 bg-slate-900">
+        <SheetContent side="bottom" className="max-h-[min(70dvh,70vh)] overflow-y-auto overscroll-contain scrollbar-thin touch-scroll rounded-t-2xl border-slate-800 bg-slate-900">
           <SheetHeader className="px-4 pt-4">
             <SheetTitle>Cloud saves</SheetTitle>
             <SheetDescription>Saved careers stored in Neon Postgres for this device.</SheetDescription>

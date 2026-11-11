@@ -5,7 +5,6 @@ import { useAppStore } from "@/lib/store/gameStore";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { Cloud, CloudOff, HardDriveDownload, Play, Trash2, Trophy, UserRound } from "lucide-react";
 import { formatDate } from "@/lib/format";
 
@@ -46,8 +45,8 @@ export function OnboardingScreen() {
   };
 
   return (
-    <div className="min-h-screen w-full bg-slate-950 flex justify-center items-center font-sans antialiased">
-      <div className="w-full max-w-[480px] h-screen bg-slate-900 border-x border-slate-800 flex flex-col relative overflow-hidden shadow-2xl">
+    <div className="app-viewport w-full bg-slate-950 flex justify-center items-center font-sans antialiased">
+      <div className="w-full max-w-[480px] h-full bg-slate-900 border-x border-slate-800 flex flex-col relative overflow-hidden shadow-2xl">
         {/* hero */}
         <div className="px-6 pt-10 pb-6 border-b border-slate-800 bg-gradient-to-b from-emerald-950/40 to-slate-900">
           <div className="flex items-center gap-3">
@@ -77,7 +76,7 @@ export function OnboardingScreen() {
           </div>
         </div>
 
-        <ScrollArea className="flex-1 scrollbar-thin">
+        <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain scrollbar-thin touch-scroll">
           <div className="p-4 space-y-5">
             {/* continue saves */}
             {saves.length > 0 && (
@@ -186,7 +185,7 @@ export function OnboardingScreen() {
               </p>
             </div>
           </div>
-        </ScrollArea>
+        </div>
       </div>
     </div>
   );

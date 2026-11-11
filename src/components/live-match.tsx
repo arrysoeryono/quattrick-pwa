@@ -4,7 +4,6 @@ import { useEffect, useRef, useState } from "react";
 import { useAppStore } from "@/lib/store/gameStore";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import { Goal, Pause, Play, Square, Zap } from "lucide-react";
 
@@ -136,7 +135,7 @@ export function LiveMatch() {
       {/* commentary */}
       <div className="rounded-xl border border-slate-800 bg-slate-950/50">
         <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 px-3 pt-2.5">Commentary</p>
-        <div ref={feedRef} className="max-h-64 overflow-y-auto scrollbar-thin px-3 pb-3">
+        <div ref={feedRef} className="max-h-64 overflow-y-auto overscroll-contain scrollbar-thin touch-scroll px-3 pb-3">
           <ol className="space-y-2 pt-1" aria-live="polite" aria-label="Match commentary feed">
             {[...liveSnapshot.events].reverse().map((e, i) => (
               <li key={`${e.minute}-${i}`} className={cn("flex gap-2 text-xs leading-snug", e.type === "goal" && "font-semibold text-emerald-300", e.type === "card" && "text-amber-200", e.type === "injury" && "text-rose-300")}>

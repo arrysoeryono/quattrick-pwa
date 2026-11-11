@@ -121,6 +121,33 @@
   }
 }
 
+/*
+ * Quattrick app frame.
+ * The app shell owns all scrolling internally; the document itself never
+ * scrolls. This avoids the mobile 100vh/URL-bar jump and makes the inner
+ * scrollers the single source of scrolling on smartphones.
+ */
+html,
+body {
+  height: 100%;
+  overscroll-behavior: none; /* no pull-to-refresh / rubber-band on the page */
+}
+body {
+  overflow: hidden;
+}
+
+/* Exact mobile viewport height: vh fallback first, dvh for modern browsers. */
+.app-viewport {
+  height: 100vh;
+  height: 100dvh;
+}
+
+/* Native momentum scroller with contained scroll-chaining (touch friendly). */
+.touch-scroll {
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+}
+
 /* Quattrick app scrollbars */
 .scrollbar-thin {
   scrollbar-width: thin;

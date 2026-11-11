@@ -4,7 +4,6 @@ import { useMemo } from "react";
 import { useAppStore } from "@/lib/store/gameStore";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { LiveMatch } from "@/components/live-match";
 import { buildUserMatchTeam, aiFormationFor, getUserNextFixture } from "@/lib/game/advance";

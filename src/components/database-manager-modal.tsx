@@ -28,7 +28,6 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Progress } from "@/components/ui/progress";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { downloadExcelTemplate, exportDatasetToExcel } from "@/lib/excel/excelGenerator";
 import { outcomeToDataset, parseExcelFile, type ParseOutcome } from "@/lib/excel/excelParser";
 import type { Dataset } from "@/lib/game/types";
@@ -196,7 +195,7 @@ export function DatabaseManagerModal({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[85vh] max-w-[440px] overflow-y-auto sm:max-w-[440px]">
+      <DialogContent className="max-h-[min(85dvh,85vh)] max-w-[440px] overflow-y-auto overscroll-contain touch-scroll sm:max-w-[440px]">
         <DialogHeader>
           <DialogTitle>Database Manager</DialogTitle>
           <DialogDescription>
@@ -339,7 +338,7 @@ export function DatabaseManagerModal({
                       <p className="text-xs font-medium text-amber-400">
                         Auto-fixed issues ({outcome.warnings.length})
                       </p>
-                      <ScrollArea className="max-h-32 rounded-md border bg-muted/30 p-2">
+                      <div className="max-h-32 overflow-y-auto overscroll-contain rounded-md border bg-muted/30 p-2 touch-scroll">
                         <ul className="space-y-1 text-xs">
                           {outcome.warnings.map((warning, index) => (
                             <li key={index} className="text-amber-400/90">
@@ -347,7 +346,7 @@ export function DatabaseManagerModal({
                             </li>
                           ))}
                         </ul>
-                      </ScrollArea>
+                      </div>
                     </div>
                   )}
 
@@ -356,13 +355,13 @@ export function DatabaseManagerModal({
                       <p className="text-xs font-medium text-destructive">
                         Blocking errors ({outcome.errors.length})
                       </p>
-                      <ScrollArea className="max-h-40 rounded-md border bg-muted/30 p-2">
+                      <div className="max-h-40 overflow-y-auto overscroll-contain rounded-md border bg-muted/30 p-2 touch-scroll">
                         <ul className="space-y-1 text-xs text-destructive">
                           {outcome.errors.map((error, index) => (
                             <li key={index}>{error}</li>
                           ))}
                         </ul>
-                      </ScrollArea>
+                      </div>
                     </div>
                   )}
 

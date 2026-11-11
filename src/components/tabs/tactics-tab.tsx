@@ -5,7 +5,6 @@ import { useAppStore } from "@/lib/store/gameStore";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Slider } from "@/components/ui/slider";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -327,12 +326,12 @@ export function TacticsTab() {
 
       {/* formation picker dialog */}
       <Dialog open={formationDialog} onOpenChange={setFormationDialog}>
-        <DialogContent className="max-w-[420px] max-h-[80vh] p-0">
+        <DialogContent className="max-w-[420px] max-h-[min(80dvh,80vh)] overflow-y-auto overscroll-contain p-0 touch-scroll">
           <DialogHeader className="px-4 pt-4 pb-2">
             <DialogTitle>Choose formation</DialogTitle>
             <DialogDescription>30 tactical presets across back-3, back-4 and back-5 systems.</DialogDescription>
           </DialogHeader>
-          <ScrollArea className="max-h-[56vh] px-4 pb-4 scrollbar-thin">
+          <div className="max-h-[min(56dvh,56vh)] overflow-y-auto overscroll-contain px-4 pb-4 scrollbar-thin touch-scroll">
             {[3, 4, 5].map((back) => (
               <div key={back} className="mb-3">
                 <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500 mb-1.5">
@@ -361,13 +360,13 @@ export function TacticsTab() {
                 </div>
               </div>
             ))}
-          </ScrollArea>
+          </div>
         </DialogContent>
       </Dialog>
 
       {/* slot picker + instructions dialog */}
       <Dialog open={slotDialog !== null} onOpenChange={(o) => !o && setSlotDialog(null)}>
-        <DialogContent className="max-w-[420px] max-h-[84vh] p-0">
+        <DialogContent className="max-w-[420px] max-h-[min(84dvh,84vh)] overflow-y-auto overscroll-contain p-0 touch-scroll">
           {selectedSlot !== null && (
             <>
               <DialogHeader className="px-4 pt-4 pb-2">
@@ -387,7 +386,7 @@ export function TacticsTab() {
                 </TabsList>
 
                 <TabsContent value="assign" className="mt-2">
-                  <ScrollArea className="max-h-[42vh] scrollbar-thin">
+                  <div className="max-h-[min(42dvh,42vh)] overflow-y-auto overscroll-contain scrollbar-thin touch-scroll">
                     <ul className="space-y-1.5 pr-1">
                       {benchOptions.map(({ p, aff, eff }) => {
                         const label = affinityLabel(aff);
@@ -429,7 +428,7 @@ export function TacticsTab() {
                     >
                       Leave empty
                     </Button>
-                  </ScrollArea>
+                  </div>
                 </TabsContent>
 
                 <TabsContent value="instructions" className="mt-2 space-y-3">

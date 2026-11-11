@@ -23,8 +23,8 @@ export function AppShell() {
 
   if (phase === "boot") {
     return (
-      <div className="min-h-screen w-full bg-slate-950 flex justify-center items-center font-sans antialiased">
-        <div className="w-full max-w-[480px] h-screen bg-slate-900 border-x border-slate-800 flex flex-col items-center justify-center gap-4 relative overflow-hidden shadow-2xl">
+      <div className="app-viewport w-full bg-slate-950 flex justify-center items-center font-sans antialiased">
+        <div className="w-full max-w-[480px] h-full bg-slate-900 border-x border-slate-800 flex flex-col items-center justify-center gap-4 relative overflow-hidden shadow-2xl">
           <div className="h-16 w-16 rounded-2xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center">
             <LoaderCircle className="h-8 w-8 text-emerald-400 animate-spin" aria-hidden />
           </div>
@@ -42,10 +42,10 @@ export function AppShell() {
   }
 
   return (
-    <div className="min-h-screen w-full bg-slate-950 flex justify-center items-center font-sans antialiased">
-      <div className="w-full max-w-[480px] h-screen bg-slate-900 border-x border-slate-800 flex flex-col relative overflow-hidden shadow-2xl">
+    <div className="app-viewport w-full bg-slate-950 flex justify-center items-center font-sans antialiased">
+      <div className="w-full max-w-[480px] h-full bg-slate-900 border-x border-slate-800 flex flex-col relative overflow-hidden shadow-2xl">
         <AppHeader />
-        <main className="flex-1 overflow-y-auto p-4 space-y-4 pb-24 scrollbar-thin" aria-label="Main content">
+        <main className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-4 space-y-4 pb-24 scrollbar-thin touch-scroll" aria-label="Main content">
           {activeTab === "home" && <HomeTab />}
           {activeTab === "squad" && <SquadTab />}
           {activeTab === "tactics" && <TacticsTab />}
