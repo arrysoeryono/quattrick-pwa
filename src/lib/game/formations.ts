@@ -43,6 +43,7 @@ export const FORMATIONS: Formation[] = [
   f("3-4-3 Flat", "Attacking Possession", 3, ["GK", "CB", "CB", "CB", "RM", "CM", "CM", "LM", "RW", "ST", "LW"]),
   f("3-1-4-2", "Single Pivot Control", 3, ["GK", "CB", "CB", "CB", "CDM", "RM", "CM", "CM", "LM", "ST", "ST"]),
   f("3-4-3 Diamond", "Total Football", 3, ["GK", "CB", "CB", "CB", "CDM", "RM", "LM", "CAM", "RW", "ST", "LW"]),
+  f("3-4-3 Wing Backs", "Attacking Wing Play", 3, ["GK", "CB", "CB", "CB", "RWB", "CDM", "CM", "LWB", "RW", "ST", "LW"]),
   // ---------------- Back 5 ----------------
   f("5-3-2", "Counter Attack / Solid", 5, ["GK", "RWB", "CB", "CB", "CB", "LWB", "CM", "CM", "CM", "ST", "ST"]),
   f("5-2-1-2", "Counter Attack", 5, ["GK", "RWB", "CB", "CB", "CB", "LWB", "CM", "CM", "CAM", "ST", "ST"]),

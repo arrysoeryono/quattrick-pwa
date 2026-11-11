@@ -63,6 +63,25 @@ export interface Dataset {
 
 export type SquadRole = "Star Player" | "Important" | "Rotation" | "Prospect";
 
+export type TrainingFocus = "balanced" | "attacking" | "defensive" | "technical" | "pace" | "shooting";
+export type TrainingIntensity = "light" | "normal" | "intense";
+
+export interface TrainingPlan {
+  focus: TrainingFocus;
+  intensity: TrainingIntensity;
+}
+
+/** Position retraining in progress (FIFA-style conversion, 4-52 weeks). */
+export interface RetrainState {
+  target: PositionCode;
+  weeksLeft: number;
+  totalWeeks: number;
+}
+
+export interface StaffState {
+  coachLevel: "Novice" | "Accomplished" | "Expert";
+}
+
 export interface SeasonStats {
   apps: number;
   goals: number;
@@ -79,6 +98,8 @@ export interface PlayerState extends PlayerRow {
   injuryWeeks: number; // 0 = fit
   contractYears: number;
   squadRole: SquadRole;
+  trainingPlan: TrainingPlan;
+  retrain: RetrainState | null;
   seasonStats: SeasonStats;
   careerStats: { apps: number; goals: number; assists: number };
 }
@@ -142,9 +163,39 @@ export interface MatchResult {
 
 export type Mentality = "defensive" | "balanced" | "attacking";
 
+/** FIFA-style tactical sliders (1-100). Applied inside the match engine. */
+export interface TacticSliders {
+  buildUpSpeed: number;       // short patient build-up <-> fast direct outlets
+  chanceCreation: number;     // patient passing <-> risky dribbling/through balls
+  attackingWidth: number;     // narrow central overloads <-> wide flank focus
+  defensiveWidth: number;     // compact central block <-> spread to the flanks
+  pressingIntensity: number;  // drop off <-> full gegenpress
+  defensiveLine: number;      // deep block <-> high line
+  tempo: number;              // slow control <-> fast tempo
+  aggression: number;         // cautious tackling <-> all-in sliding challenges
+}
+
+export interface PlayerInstruction {
+  att?: string; // attacking-phase instruction id
+  def?: string; // defensive-phase instruction id
+}
+
+export interface SetPieceAssignments {
+  captain: number | null;
+  penalty: number | null;
+  freeKick: number | null;
+  cornerLeft: number | null;
+  cornerRight: number | null;
+}
+
 export interface Tactics {
   formationName: string;
   mentality: Mentality;
+  gamePlan: string;                 // preset id from tacticPresets
+  sliders: TacticSliders;
+  /** keyed by lineup slot index (0-10) */
+  instructions: Record<string, PlayerInstruction>;
+  setPieces: SetPieceAssignments;
 }
 
 export interface SeasonHistoryEntry {
@@ -172,6 +223,7 @@ export interface GameState {
   wageBudget: number; // weekly
   players: PlayerState[]; // manager's squad snapshot (runtime state)
   tactics: Tactics;
+  staff: StaffState;
   lineup: (number | null)[]; // aligned to formation.positions
   fixtures: Fixture[]; // user's league fixtures (all clubs)
   news: NewsItem[];
@@ -218,6 +270,8 @@ export interface MatchTeamConfig {
   shortName: string;
   formation: string;
   mentality: Mentality;
+  sliders?: TacticSliders;
+  setPieces?: Partial<SetPieceAssignments>;
   /** 11 starters aligned to formation slots */
   players: {
     id: number;
@@ -229,5 +283,7 @@ export interface MatchTeamConfig {
     sharpness: number;
     morale: number;
     age: number;
+    instr?: PlayerInstruction;
+    playStyles?: string[]; // playstyle ids active in the engine
   }[];
 }

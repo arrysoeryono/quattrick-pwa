@@ -8,10 +8,10 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
 import { PlayerDetailBody } from "@/components/player-detail";
+import { DevelopmentPanel } from "@/components/development-panel";
 import { cn } from "@/lib/utils";
 import { posBadgeClass, ratingColor, formatMoney } from "@/lib/format";
 import { Cross, Search } from "lucide-react";
-import type { PlayerState } from "@/lib/game/types";
 
 type GroupFilter = "ALL" | "GK" | "DEF" | "MID" | "ATT";
 
@@ -26,7 +26,8 @@ export function SquadTab() {
   const game = useAppStore((s) => s.game);
   const [filter, setFilter] = useState<GroupFilter>("ALL");
   const [query, setQuery] = useState("");
-  const [selected, setSelected] = useState<PlayerState | null>(null);
+  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const selected = selectedId !== null ? game.players.find((p) => p.id === selectedId) ?? null : null;
 
   const squad = useMemo(() => {
     if (!game) return [];
@@ -95,7 +96,7 @@ export function SquadTab() {
             <li key={p.id}>
               <button
                 type="button"
-                onClick={() => setSelected(p)}
+                onClick={() => setSelectedId(p.id)}
                 className="w-full flex items-center gap-2.5 rounded-xl border border-slate-800 bg-slate-950/40 p-2.5 text-left hover:border-slate-700 transition-colors"
                 aria-label={`Player ${p.name}, overall ${p.overallRating}`}
               >
@@ -105,6 +106,11 @@ export function SquadTab() {
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-1.5">
                     <p className="text-sm font-semibold text-slate-100 truncate">{p.name}</p>
+                    {p.retrain && (
+                      <span className="shrink-0 text-[9px] font-bold text-amber-400" aria-label={`Converting to ${p.retrain.target}`}>
+                        →{p.retrain.target} {p.retrain.weeksLeft}w
+                      </span>
+                    )}
                     {p.injuryWeeks > 0 && (
                       <span className="flex items-center gap-0.5 text-[10px] text-rose-400 shrink-0">
                         <Cross className="h-3 w-3" aria-hidden />
@@ -135,7 +141,7 @@ export function SquadTab() {
         </ul>
       </ScrollArea>
 
-      <Sheet open={selected !== null} onOpenChange={(o) => !o && setSelected(null)}>
+      <Sheet open={selected !== null} onOpenChange={(o) => !o && setSelectedId(null)}>
         <SheetContent side="bottom" className="max-h-[88vh] overflow-y-auto scrollbar-thin rounded-t-2xl border-slate-800 bg-slate-900 p-0">
           {selected && (
             <>
@@ -158,6 +164,8 @@ export function SquadTab() {
               </SheetHeader>
               <div className="p-4">
                 <PlayerDetailBody player={selected} />
+                <Separator className="my-3 bg-slate-800" />
+                <DevelopmentPanel player={selected} />
                 <Separator className="my-3 bg-slate-800" />
                 <div className="grid grid-cols-3 gap-2 text-center">
                   <div className="rounded-lg bg-slate-950/60 p-2">

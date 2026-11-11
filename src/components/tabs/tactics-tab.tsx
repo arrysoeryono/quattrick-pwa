@@ -6,10 +6,15 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { FORMATIONS, formationCoordinates, getFormation, positionAffinity, affinityLabel } from "@/lib/game/formations";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Slider } from "@/components/ui/slider";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { FORMATIONS, formationCoordinates, getFormation, positionAffinity, affinityLabel, positionGroup } from "@/lib/game/formations";
 import { autoPickLineup, effectiveOvr, squadChemistry } from "@/lib/game/tactics";
+import { GAME_PLANS, SLIDER_META, ATTACK_INSTRUCTIONS, DEFEND_INSTRUCTIONS, instructionsForGroup } from "@/lib/game/tacticPresets";
 import { cn } from "@/lib/utils";
-import { Sparkles, Wand2 } from "lucide-react";
+import { ClipboardList, Sparkles, Wand2 } from "lucide-react";
+import type { PlayerState, SetPieceAssignments } from "@/lib/game/types";
 
 const CATEGORY_TONE: Record<string, string> = {
   Balanced: "text-slate-300 border-slate-600",
@@ -32,6 +37,7 @@ const CATEGORY_TONE: Record<string, string> = {
   "Attacking Possession": "text-teal-300 border-teal-500/40",
   "Single Pivot Control": "text-slate-300 border-slate-600",
   "Total Football": "text-teal-300 border-teal-500/40",
+  "Attacking Wing Play": "text-teal-300 border-teal-500/40",
   "Counter Attack / Solid": "text-orange-300 border-orange-500/40",
   "Ultra Defensive": "text-sky-300 border-sky-500/40",
   "Defensive Control": "text-sky-300 border-sky-500/40",
@@ -45,10 +51,19 @@ function affinityRing(a: number): string {
   return "border-rose-500/70";
 }
 
+const SET_PIECE_ROLES: { key: keyof SetPieceAssignments; label: string }[] = [
+  { key: "captain", label: "Captain" },
+  { key: "penalty", label: "Penalty taker" },
+  { key: "freeKick", label: "Free kick taker" },
+  { key: "cornerLeft", label: "Corner (left)" },
+  { key: "cornerRight", label: "Corner (right)" },
+];
+
 export function TacticsTab() {
   const game = useAppStore((s) => s.game);
   const update = useAppStore((s) => s.update);
   const [formationDialog, setFormationDialog] = useState(false);
+  const [setPieceDialog, setSetPieceDialog] = useState(false);
   const [slotDialog, setSlotDialog] = useState<number | null>(null);
 
   const formation = useMemo(() => (game ? getFormation(game.tactics.formationName) : null), [game]);
@@ -68,6 +83,7 @@ export function TacticsTab() {
   }, [selectedSlot, game, formation]);
 
   if (!game || !formation) return null;
+  const t = game.tactics;
 
   const setFormation = (name: string) => {
     update((g) => {
@@ -88,6 +104,8 @@ export function TacticsTab() {
       // fill gaps
       const auto = autoPickLineup(g.players, name);
       g.lineup = g.lineup.map((id, i) => (id !== null ? id : auto[i]));
+      // drop instructions for out-of-group slots
+      g.tactics.instructions = {};
     });
     setFormationDialog(false);
   };
@@ -102,6 +120,8 @@ export function TacticsTab() {
         }
       }
       g.lineup[slotIndex] = playerId;
+      // clear stale instructions on that slot
+      delete g.tactics.instructions[String(slotIndex)];
     });
     setSlotDialog(null);
   };
@@ -109,6 +129,7 @@ export function TacticsTab() {
   const autoPick = () => {
     update((g) => {
       g.lineup = autoPickLineup(g.players, g.tactics.formationName);
+      g.tactics.instructions = {};
     });
   };
 
@@ -118,7 +139,43 @@ export function TacticsTab() {
     });
   };
 
-  const slotPlayer = (i: number) => game.players.find((p) => p.id === game.lineup[i]) ?? null;
+  const applyPlan = (planId: string) => {
+    update((g) => {
+      const plan = GAME_PLANS.find((p) => p.id === planId) ?? GAME_PLANS[0];
+      g.tactics.gamePlan = plan.id;
+      g.tactics.sliders = { ...plan.sliders };
+      g.tactics.mentality = plan.mentality;
+    });
+  };
+
+  const setSlider = (key: keyof (typeof t)["sliders"], value: number) => {
+    update((g) => {
+      g.tactics.sliders[key] = value;
+    });
+  };
+
+  const setInstruction = (slotIndex: number, phase: "att" | "def", id: string) => {
+    update((g) => {
+      const key = String(slotIndex);
+      const cur = g.tactics.instructions[key] ?? {};
+      g.tactics.instructions[key] = { ...cur, [phase]: id === "none" ? undefined : id } as { att?: string; def?: string };
+    });
+  };
+
+  const setSetPiece = (role: keyof SetPieceAssignments, playerId: string) => {
+    update((g) => {
+      g.tactics.setPieces[role] = playerId === "none" ? null : Number(playerId);
+    });
+  };
+
+  const slotPlayer = (i: number): PlayerState | null => game.players.find((p) => p.id === game.lineup[i]) ?? null;
+  const lineupPlayers = game.lineup
+    .map((id) => game.players.find((p) => p.id === id))
+    .filter(Boolean) as PlayerState[];
+
+  const slotGroup = selectedSlot !== null ? positionGroup(formation.positions[selectedSlot]) : null;
+  const slotInstr = slotGroup ? instructionsForGroup(slotGroup) : null;
+  const slotPlayerInstr = selectedSlot !== null ? t.instructions?.[String(selectedSlot)] : undefined;
 
   return (
     <div className="space-y-3">
@@ -132,6 +189,9 @@ export function TacticsTab() {
         </Button>
         <Button variant="outline" size="icon" className="h-10 w-10 border-slate-700" onClick={autoPick} aria-label="Auto pick best XI">
           <Wand2 className="h-4 w-4 text-emerald-400" aria-hidden />
+        </Button>
+        <Button variant="outline" size="icon" className="h-10 w-10 border-slate-700" onClick={() => setSetPieceDialog(true)} aria-label="Set piece takers">
+          <ClipboardList className="h-4 w-4 text-amber-400" aria-hidden />
         </Button>
       </section>
 
@@ -150,6 +210,7 @@ export function TacticsTab() {
             const slot = formation.positions[i];
             const aff = player ? positionAffinity(player.position, slot) : 1;
             const eff = player ? effectiveOvr(player, slot) : 0;
+            const hasInstr = player && (t.instructions?.[String(i)]?.att || t.instructions?.[String(i)]?.def);
             return (
               <button
                 key={i}
@@ -157,11 +218,12 @@ export function TacticsTab() {
                 onClick={() => setSlotDialog(i)}
                 className="absolute -translate-x-1/2 -translate-y-1/2 flex flex-col items-center gap-0.5 min-h-[44px] min-w-[44px] justify-center"
                 style={{ left: `${c.x * 100}%`, top: `${c.y * 100}%` }}
-                aria-label={`Slot ${slot}: ${player ? player.name : "empty"}`}
+                aria-label={`Slot ${slot}: ${player ? player.name : "empty"}${hasInstr ? ", has instructions" : ""}`}
               >
                 <span className={cn(
                   "flex h-9 w-9 items-center justify-center rounded-full border-2 bg-slate-950/85 text-xs font-black shadow-lg",
                   player ? `${affinityRing(aff)} text-slate-50` : "border-dashed border-slate-400/70 text-slate-500",
+                  hasInstr && "ring-2 ring-amber-400/60",
                 )}>
                   {player ? eff : slot}
                 </span>
@@ -172,6 +234,61 @@ export function TacticsTab() {
             );
           })}
         </div>
+      </section>
+
+      {/* game plans */}
+      <section aria-label="Game plans" className="rounded-xl border border-slate-800 bg-slate-950/40 p-3">
+        <div className="flex items-center justify-between mb-2">
+          <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Game plan</p>
+          <Badge variant="outline" className="text-[9px] border-emerald-500/40 text-emerald-400">
+            {GAME_PLANS.find((p) => p.id === t.gamePlan)?.name ?? "Custom"}
+          </Badge>
+        </div>
+        <div className="grid grid-cols-2 gap-1.5">
+          {GAME_PLANS.map((p) => (
+            <button
+              key={p.id}
+              type="button"
+              onClick={() => applyPlan(p.id)}
+              aria-pressed={t.gamePlan === p.id}
+              className={cn(
+                "min-h-[38px] rounded-lg border px-2 text-left transition-colors",
+                t.gamePlan === p.id
+                  ? "border-emerald-500/60 bg-emerald-500/10"
+                  : "border-slate-800 bg-slate-950/40 hover:border-slate-700",
+              )}
+            >
+              <span className={cn("block text-xs font-bold", t.gamePlan === p.id ? "text-emerald-400" : "text-slate-300")}>{p.name}</span>
+              <span className="block text-[9px] text-slate-500 leading-tight truncate">{p.tagline}</span>
+            </button>
+          ))}
+        </div>
+      </section>
+
+      {/* sliders */}
+      <section aria-label="Tactical sliders" className="rounded-xl border border-slate-800 bg-slate-950/40 p-3 space-y-3">
+        <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Custom instructions</p>
+        {SLIDER_META.map(({ key, label, low, high }) => (
+          <div key={key}>
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-[11px] font-semibold text-slate-300">{label}</span>
+              <span className="text-[10px] font-mono text-emerald-400 tabular-nums">{t.sliders[key]}</span>
+            </div>
+            <Slider
+              value={[t.sliders[key]]}
+              min={1}
+              max={100}
+              step={1}
+              onValueChange={([v]) => setSlider(key, v)}
+              aria-label={label}
+              className="[&_[role=slider]]:h-3.5 [&_[role=slider]]:w-3.5"
+            />
+            <div className="flex justify-between mt-0.5">
+              <span className="text-[9px] text-slate-600">{low}</span>
+              <span className="text-[9px] text-slate-600">{high}</span>
+            </div>
+          </div>
+        ))}
       </section>
 
       {/* chemistry + mentality */}
@@ -191,10 +308,10 @@ export function TacticsTab() {
               key={m}
               type="button"
               onClick={() => setMentality(m)}
-              aria-pressed={game.tactics.mentality === m}
+              aria-pressed={t.mentality === m}
               className={cn(
                 "min-h-[38px] rounded-lg border text-xs font-semibold capitalize transition-colors",
-                game.tactics.mentality === m
+                t.mentality === m
                   ? "border-emerald-500/60 bg-emerald-500/10 text-emerald-400"
                   : "border-slate-800 bg-slate-950/40 text-slate-400 hover:border-slate-700",
               )}
@@ -204,7 +321,7 @@ export function TacticsTab() {
           ))}
         </div>
         <p className="text-[11px] text-slate-600 text-center">
-          Tap a position chip to swap players. Ring color shows position familiarity.
+          Tap a chip to swap players and add per-player instructions. Amber ring = custom instruction.
         </p>
       </section>
 
@@ -213,7 +330,7 @@ export function TacticsTab() {
         <DialogContent className="max-w-[420px] max-h-[80vh] p-0">
           <DialogHeader className="px-4 pt-4 pb-2">
             <DialogTitle>Choose formation</DialogTitle>
-            <DialogDescription>29 tactical presets across back-3, back-4 and back-5 systems.</DialogDescription>
+            <DialogDescription>30 tactical presets across back-3, back-4 and back-5 systems.</DialogDescription>
           </DialogHeader>
           <ScrollArea className="max-h-[56vh] px-4 pb-4 scrollbar-thin">
             {[3, 4, 5].map((back) => (
@@ -229,7 +346,7 @@ export function TacticsTab() {
                       onClick={() => setFormation(f.name)}
                       className={cn(
                         "w-full flex items-center justify-between rounded-lg border p-2.5 text-left transition-colors",
-                        f.name === game.tactics.formationName
+                        f.name === t.formationName
                           ? "border-emerald-500/60 bg-emerald-500/10"
                           : "border-slate-800 bg-slate-950/40 hover:border-slate-700",
                       )}
@@ -248,62 +365,160 @@ export function TacticsTab() {
         </DialogContent>
       </Dialog>
 
-      {/* slot picker dialog */}
+      {/* slot picker + instructions dialog */}
       <Dialog open={slotDialog !== null} onOpenChange={(o) => !o && setSlotDialog(null)}>
-        <DialogContent className="max-w-[400px] max-h-[80vh] p-0">
+        <DialogContent className="max-w-[420px] max-h-[84vh] p-0">
           {selectedSlot !== null && (
             <>
               <DialogHeader className="px-4 pt-4 pb-2">
                 <DialogTitle>
-                  Select {formation.positions[selectedSlot]} — slot {selectedSlot + 1}
+                  {formation.positions[selectedSlot]} — slot {selectedSlot + 1}
                 </DialogTitle>
-                <DialogDescription>Sorted by effective rating in this role.</DialogDescription>
+                <DialogDescription>
+                  {slotPlayer(selectedSlot) ? slotPlayer(selectedSlot)!.name : "Empty slot"} · assign or set instructions
+                </DialogDescription>
               </DialogHeader>
-              <ScrollArea className="max-h-[52vh] px-4 pb-4 scrollbar-thin">
-                <ul className="space-y-1.5">
-                  {benchOptions.map(({ p, aff, eff }) => {
-                    const label = affinityLabel(aff);
-                    return (
-                      <li key={p.id}>
-                        <button
-                          type="button"
-                          onClick={() => assignPlayer(selectedSlot, p.id)}
-                          className={cn(
-                            "w-full flex items-center gap-2 rounded-lg border p-2.5 text-left transition-colors",
-                            p.injuryWeeks > 0 ? "border-rose-500/30 bg-rose-500/5 opacity-70" : "border-slate-800 bg-slate-950/40 hover:border-slate-600",
-                          )}
-                          aria-label={`Assign ${p.name}`}
+              <Tabs defaultValue="assign" className="px-4 pb-4">
+                <TabsList className="w-full bg-slate-950 border border-slate-800">
+                  <TabsTrigger value="assign" className="flex-1 text-xs data-[state=active]:text-emerald-400">Assign</TabsTrigger>
+                  <TabsTrigger value="instructions" className="flex-1 text-xs data-[state=active]:text-emerald-400" disabled={!slotPlayer(selectedSlot)}>
+                    Instructions
+                  </TabsTrigger>
+                </TabsList>
+
+                <TabsContent value="assign" className="mt-2">
+                  <ScrollArea className="max-h-[42vh] scrollbar-thin">
+                    <ul className="space-y-1.5 pr-1">
+                      {benchOptions.map(({ p, aff, eff }) => {
+                        const label = affinityLabel(aff);
+                        return (
+                          <li key={p.id}>
+                            <button
+                              type="button"
+                              onClick={() => assignPlayer(selectedSlot, p.id)}
+                              className={cn(
+                                "w-full flex items-center gap-2 rounded-lg border p-2.5 text-left transition-colors",
+                                p.injuryWeeks > 0 ? "border-rose-500/30 bg-rose-500/5 opacity-70" : "border-slate-800 bg-slate-950/40 hover:border-slate-600",
+                              )}
+                              aria-label={`Assign ${p.name}`}
+                            >
+                              <span className={cn(
+                                "flex h-8 w-8 items-center justify-center rounded-full border text-xs font-black",
+                                aff >= 0.8 ? "border-emerald-500/60 text-emerald-400" : aff >= 0.65 ? "border-amber-500/60 text-amber-400" : "border-rose-500/60 text-rose-400",
+                              )}>
+                                {eff}
+                              </span>
+                              <div className="flex-1 min-w-0">
+                                <p className="text-sm font-semibold text-slate-200 truncate">
+                                  {p.name} {p.injuryWeeks > 0 && <span className="text-[10px] text-rose-400">(injured {p.injuryWeeks}w)</span>}
+                                </p>
+                                <p className="text-[11px] text-slate-500">
+                                  {p.position} · OVR {p.overallRating} · {label.label}
+                                </p>
+                              </div>
+                            </button>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                    <Button
+                      variant="outline"
+                      className="mt-2 w-full border-slate-700 text-slate-400"
+                      onClick={() => assignPlayer(selectedSlot, null)}
+                      aria-label="Leave slot empty"
+                    >
+                      Leave empty
+                    </Button>
+                  </ScrollArea>
+                </TabsContent>
+
+                <TabsContent value="instructions" className="mt-2 space-y-3">
+                  {slotInstr && (
+                    <>
+                      <div>
+                        <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500 mb-1">Attacking phase</p>
+                        <Select
+                          value={slotPlayerInstr?.att ?? "none"}
+                          onValueChange={(v) => setInstruction(selectedSlot, "att", v)}
                         >
-                          <span className={cn(
-                            "flex h-8 w-8 items-center justify-center rounded-full border text-xs font-black",
-                            aff >= 0.8 ? "border-emerald-500/60 text-emerald-400" : aff >= 0.65 ? "border-amber-500/60 text-amber-400" : "border-rose-500/60 text-rose-400",
-                          )}>
-                            {eff}
-                          </span>
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm font-semibold text-slate-200 truncate">
-                              {p.name} {p.injuryWeeks > 0 && <span className="text-[10px] text-rose-400">(injured {p.injuryWeeks}w)</span>}
-                            </p>
-                            <p className="text-[11px] text-slate-500">
-                              {p.position} · OVR {p.overallRating} · {label.label}
-                            </p>
-                          </div>
-                        </button>
-                      </li>
-                    );
-                  })}
-                </ul>
-                <Button
-                  variant="outline"
-                  className="mt-2 w-full border-slate-700 text-slate-400"
-                  onClick={() => assignPlayer(selectedSlot, null)}
-                  aria-label="Leave slot empty"
-                >
-                  Leave empty
-                </Button>
-              </ScrollArea>
+                          <SelectTrigger className="bg-slate-950 border-slate-800" aria-label="Attacking instruction">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent className="bg-slate-950 border-slate-800">
+                            {slotInstr.att.map((o) => (
+                              <SelectItem key={o.id} value={o.id} className="text-xs">
+                                {o.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <p className="text-[10px] text-slate-500 mt-1">
+                          {ATTACK_INSTRUCTIONS.find((o) => o.id === (slotPlayerInstr?.att ?? "none"))?.desc}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500 mb-1">Defensive phase</p>
+                        <Select
+                          value={slotPlayerInstr?.def ?? "none"}
+                          onValueChange={(v) => setInstruction(selectedSlot, "def", v)}
+                        >
+                          <SelectTrigger className="bg-slate-950 border-slate-800" aria-label="Defensive instruction">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent className="bg-slate-950 border-slate-800">
+                            {slotInstr.def.map((o) => (
+                              <SelectItem key={o.id} value={o.id} className="text-xs">
+                                {o.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <p className="text-[10px] text-slate-500 mt-1">
+                          {DEFEND_INSTRUCTIONS.find((o) => o.id === (slotPlayerInstr?.def ?? "none"))?.desc}
+                        </p>
+                      </div>
+                      <p className="text-[10px] text-slate-600">
+                        Instructions are role-aware: wingers can cut inside, full-backs can overlap, keepers can sweep.
+                      </p>
+                    </>
+                  )}
+                </TabsContent>
+              </Tabs>
             </>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* set pieces dialog */}
+      <Dialog open={setPieceDialog} onOpenChange={setSetPieceDialog}>
+        <DialogContent className="max-w-[400px] p-0">
+          <DialogHeader className="px-4 pt-4 pb-2">
+            <DialogTitle>Set pieces & leadership</DialogTitle>
+            <DialogDescription>Assign takers from the current starting XI. The captain steadies morale after setbacks.</DialogDescription>
+          </DialogHeader>
+          <div className="px-4 pb-4 space-y-2.5">
+            {SET_PIECE_ROLES.map(({ key, label }) => (
+              <div key={key} className="flex items-center gap-2">
+                <span className="w-28 text-xs font-semibold text-slate-400 shrink-0">{label}</span>
+                <Select
+                  value={t.setPieces?.[key] != null ? String(t.setPieces[key]) : "none"}
+                  onValueChange={(v) => setSetPiece(key, v)}
+                >
+                  <SelectTrigger className="flex-1 bg-slate-950 border-slate-800" aria-label={label}>
+                    <SelectValue placeholder="Select player" />
+                  </SelectTrigger>
+                  <SelectContent className="bg-slate-950 border-slate-800">
+                    <SelectItem value="none" className="text-xs">Not assigned</SelectItem>
+                    {lineupPlayers.map((p) => (
+                      <SelectItem key={p.id} value={String(p.id)} className="text-xs">
+                        {p.name} ({p.position})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            ))}
+          </div>
         </DialogContent>
       </Dialog>
     </div>

@@ -58,7 +58,7 @@ export function OnboardingScreen() {
               <h1 className="text-2xl font-black tracking-tight text-slate-50">
                 QUATTRICK <span className="text-emerald-400">FM</span>
               </h1>
-              <p className="text-xs text-slate-400">Football Manager PWA · v3.0 Master Edition</p>
+              <p className="text-xs text-slate-400">Football Manager PWA · v4.0 Master Edition</p>
             </div>
           </div>
           <div className="mt-4 flex items-center gap-2 text-xs">

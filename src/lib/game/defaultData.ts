@@ -32,8 +32,10 @@ const SQUAD_TEMPLATE: { pos: PositionCode; count: number }[] = [
   { pos: "CB", count: 3 },
   { pos: "LB", count: 2 },
   { pos: "RB", count: 2 },
-  { pos: "CDM", count: 2 },
-  { pos: "CM", count: 3 },
+  { pos: "LWB", count: 1 },
+  { pos: "RWB", count: 1 },
+  { pos: "CDM", count: 3 },
+  { pos: "CM", count: 2 },
   { pos: "CAM", count: 1 },
   { pos: "LM", count: 1 },
   { pos: "RM", count: 1 },
@@ -157,7 +159,9 @@ export function generateDefaultDataset(seed = 20250712): Dataset {
     return `A. ${LAST_NAMES[Math.floor(rng() * LAST_NAMES.length)]} ${Math.floor(rng() * 99)}`;
   };
 
-  let playerId = 1001;
+  // ids start at 5001 so a regenerated world never collides with squad ids
+  // held inside existing save files (1000-4999 legacy range)
+  let playerId = 5001;
 
   for (const seed_ of TEAM_SEEDS) {
     const { transferBudget, wageBudget } = teamBudgets(seed_.reputation);

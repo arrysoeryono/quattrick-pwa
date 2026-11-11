@@ -1,7 +1,7 @@
 "use client";
 
 import { create } from "zustand";
-import type { Dataset, GameState, MatchResult, SaveRecord } from "@/lib/game/types";
+import type { Dataset, GameState, MatchResult, MatchTeamConfig, SaveRecord } from "@/lib/game/types";
 import {
   loadActiveDataset,
   listSaves,
@@ -10,7 +10,7 @@ import {
   deleteSave,
   getSave,
 } from "@/lib/game/dexie";
-import { createCareerState, advanceAfterUserMatch, buyPlayer, sellPlayer, refreshLineup, type AdvanceOutcome } from "@/lib/game/advance";
+import { createCareerState, advanceAfterUserMatch, buyPlayer, sellPlayer, refreshLineup, migrateGameState, type AdvanceOutcome } from "@/lib/game/advance";
 import { generateDefaultDataset } from "@/lib/game/defaultData";
 import { MatchRunner, type TickPayload } from "@/lib/game/matchEngine";
 import type { LiveMatchSnapshot } from "@/lib/game/types";
@@ -72,24 +72,7 @@ interface AppStore {
   loadCloudSave: (id: string) => Promise<{ ok: boolean; message: string }>;
 }
 
-export interface MatchConfigInput {
-  id: number;
-  name: string;
-  shortName: string;
-  formation: string;
-  mentality: "defensive" | "balanced" | "attacking";
-  players: {
-    id: number;
-    name: string;
-    position: string;
-    ovr: number;
-    attributes: { pace: number; shooting: number; passing: number; dribbling: number; defending: number; physical: number };
-    stamina: number;
-    sharpness: number;
-    morale: number;
-    age: number;
-  }[];
-}
+export type MatchConfigInput = MatchTeamConfig;
 
 let persistTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -171,7 +154,8 @@ export const useAppStore = create<AppStore>((set, get) => ({
   continueSave: async (id) => {
     const rec = await getSave(id).catch(() => null);
     if (!rec) return;
-    set({ game: rec.state, saveId: rec.id, phase: "manage", activeTab: "home" });
+    const game = migrateGameState(rec.state);
+    set({ game, saveId: rec.id, phase: "manage", activeTab: "home" });
   },
 
   removeSave: async (id) => {
@@ -339,7 +323,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
       const json = (await res.json()) as { save?: { saveName: string; gameDataJson: GameState } };
       const save = json.save;
       if (!save?.gameDataJson) throw new Error("Empty save");
-      const game = save.gameDataJson;
+      const game = migrateGameState(save.gameDataJson);
       const clubName = get().dataset?.teams.find((t) => t.id === game.clubId)?.name ?? "Club";
       const record = await putSave(game, clubName).catch(() => null);
       set({ game, saveId: record?.id ?? null, phase: "manage", activeTab: "home" });

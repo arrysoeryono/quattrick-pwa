@@ -13,18 +13,35 @@ import {
   applySeasonDecay,
   autoSquadRole,
   computeOverall,
+  computePlayStyles,
   generateRegen,
   recalcPotential,
   recomputeOverall,
   shouldRetire,
+  tickRetrain,
   weeklyDevelopment,
 } from "./development";
 import { computeMarketValue, computeSalary, mulberry32 } from "./defaultData";
 import { autoPickLineup } from "./tactics";
+import { defaultTactics, migrateTactics } from "./tacticPresets";
 
 const rng = mulberry32(Date.now() & 0xffffffff);
 
 export const BASE_SEASON_START = Date.UTC(2025, 6, 12); // 12 July 2025
+
+export const SAVE_VERSION = 4;
+
+/* ---------------- Coaching staff (master spec levels) ---------------- */
+
+export const COACH_LEVELS = {
+  Novice: { mult: 1.05, wage: 8000, label: "+5% XP" },
+  Accomplished: { mult: 1.15, wage: 18000, label: "+15% XP" },
+  Expert: { mult: 1.3, wage: 40000, label: "+30% XP" },
+} as const;
+
+export function coachMultiplier(level: string | undefined): number {
+  return COACH_LEVELS[(level as keyof typeof COACH_LEVELS) ?? "Accomplished"]?.mult ?? 1.15;
+}
 
 export function seasonStartDate(season: number): Date {
   return new Date(BASE_SEASON_START + (season - 2025) * 364 * 24 * 3600 * 1000);
@@ -48,6 +65,8 @@ function toPlayerState(p: PlayerRow): PlayerState {
     injuryWeeks: 0,
     contractYears: 2 + (p.id % 3),
     squadRole: "Rotation",
+    trainingPlan: { focus: "balanced", intensity: "normal" },
+    retrain: null,
     seasonStats: { apps: 0, goals: 0, assists: 0, ratingSum: 0, cleanSheets: 0 },
     careerStats: { apps: 0, goals: 0, assists: 0 },
   };
@@ -70,7 +89,7 @@ export function createCareerState(managerName: string, clubId: number, dataset: 
   const fixtures = generateFixtures(leagueTeams.map((t) => t.id), seasonStartDate(2025));
 
   return {
-    version: 3,
+    version: SAVE_VERSION,
     managerName: managerName.trim() || "The Gaffer",
     clubId,
     leagueId: team.leagueId,
@@ -79,7 +98,8 @@ export function createCareerState(managerName: string, clubId: number, dataset: 
     transferBudget: team.transferBudget,
     wageBudget: team.wageBudget,
     players: squad,
-    tactics: { formationName, mentality: "balanced" },
+    tactics: defaultTactics(formationName),
+    staff: { coachLevel: "Accomplished" },
     lineup: autoPickLineup(squad, formationName),
     fixtures,
     news: [
@@ -98,6 +118,19 @@ export function createCareerState(managerName: string, clubId: number, dataset: 
 }
 
 /* ---------------- helpers for match day ---------------- */
+
+/** Migrate a legacy save (v1-v3) to the current v4 shape, in place. */
+export function migrateGameState(raw: GameState): GameState {
+  const game = raw as GameState;
+  game.tactics = migrateTactics(game.tactics, game.tactics?.formationName ?? "4-3-3 Holding");
+  if (!game.staff) game.staff = { coachLevel: "Accomplished" };
+  for (const p of game.players) {
+    if (!p.trainingPlan) p.trainingPlan = { focus: "balanced", intensity: "normal" };
+    if (p.retrain === undefined) p.retrain = null;
+  }
+  game.version = SAVE_VERSION;
+  return game;
+}
 
 const AI_FORMATIONS = ["4-3-3 Standard", "4-4-2 Flat", "4-2-3-1 Wide", "3-5-2", "4-1-4-1", "4-3-3 Holding", "5-3-2"];
 
@@ -362,11 +395,25 @@ export function advanceAfterUserMatch(
     pushNews(game, "injury", `${p.name} injured`, `Scans confirm ${p.injuryWeeks} week${p.injuryWeeks > 1 ? "s" : ""} on the sidelines.`);
   }
 
-  /* 5. weekly development tick (coach quality: Accomplished +15%) */
+  /* 5. weekly development tick — training plans, coach level, retraining */
+  const coachQ = coachMultiplier(game.staff?.coachLevel);
+  const staffWage = COACH_LEVELS[game.staff?.coachLevel ?? "Accomplished"].wage;
+  game.transferBudget -= staffWage; // weekly staff salary
   for (const p of game.players) {
     const mins = minutesPlayed.get(p.id) ?? 0;
-    weeklyDevelopment(p, mins, 1.15, rng);
-    p.stamina = Math.min(100, (p.stamina ?? 100) + 14);
+    const train = weeklyDevelopment(p, mins, coachQ, rng);
+    p.stamina = Math.min(100, (p.stamina ?? 100) + 14 + train.staminaDelta);
+    if (train.injury && p.injuryWeeks === 0) {
+      p.injuryWeeks = 1;
+      pushNews(game, "injury", `${p.name} injured in training`, "An intense gym session ended with a knock — one week on the sidelines.");
+    }
+    if (p.retrain) {
+      const done = tickRetrain(p);
+      if (done) {
+        pushNews(game, "season", `${p.name} completes position conversion`, `After ${p.retrain ? "weeks of hard work" : "retraining"}, he is now a natural ${p.position}.`);
+        p.squadRole = autoSquadRole(p, game.players);
+      }
+    }
     if (p.injuryWeeks > 0) {
       p.injuryWeeks -= 1;
       if (p.injuryWeeks === 0) pushNews(game, "injury", `${p.name} back in training`, "The medical team has cleared him for selection.");
@@ -484,6 +531,8 @@ export function buildUserMatchTeam(game: GameState, team: TeamRow) {
       sharpness: p.sharpness,
       morale: p.morale,
       age: p.age,
+      instr: game.tactics.instructions?.[String(i)] ?? {},
+      playStyles: computePlayStyles(p).map((s) => s.id),
     };
   });
   const formationObj = getFormation(game.tactics.formationName);
@@ -502,6 +551,8 @@ export function buildUserMatchTeam(game: GameState, team: TeamRow) {
       players[i] = {
         id: c.id, name: c.name, position: c.position, ovr: c.overallRating,
         attributes: c.attributes, stamina: c.stamina, sharpness: c.sharpness, morale: c.morale, age: c.age,
+        instr: game.tactics.instructions?.[String(i)] ?? {},
+        playStyles: computePlayStyles(c).map((s) => s.id),
       };
     }
   }
@@ -511,6 +562,8 @@ export function buildUserMatchTeam(game: GameState, team: TeamRow) {
     shortName: team.shortName,
     formation: game.tactics.formationName,
     mentality: game.tactics.mentality,
+    sliders: game.tactics.sliders,
+    setPieces: game.tactics.setPieces,
     players: players.filter(Boolean) as NonNullable<(typeof players)[number]>[],
   };
 }

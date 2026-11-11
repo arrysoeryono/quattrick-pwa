@@ -3,16 +3,21 @@
  * Quattrick Match Engine — Spatial probabilistic simulation driven by 50ms ticks.
  * Runs off the main thread; streams minute-by-minute snapshots to the UI.
  *
+ * v4: consumes the advanced tactics layer — game-plan sliders, per-player
+ * instructions, playstyles and set-piece takers all feed the probability model.
+ *
  * xG model variables: shot angle, distance to goal, defensive pressure.
  * Stamina: LostStamina = f(baseStamina, workrate, distanceCovered) per spec.
  */
 import { getFormation, positionAffinity } from "./formations";
+import { NEUTRAL_SLIDERS } from "./tacticPresets";
 import type {
   MatchEventLog,
   MatchRatingEntry,
   MatchResult,
   MatchStats,
   MatchTeamConfig,
+  TacticSliders,
 } from "./types";
 
 /* ---------- RNG (seeded) ---------- */
@@ -47,6 +52,29 @@ interface SimPlayer {
   shots: number;
   yellow: number;
   sentOff: boolean;
+  instr: { att?: string; def?: string };
+  playStyles: Set<string>;
+}
+
+interface TeamMods {
+  /** attacking-phase power multiplier */
+  att: number;
+  /** midfield/possession power multiplier */
+  mid: number;
+  /** defensive-phase power multiplier */
+  def: number;
+  /** extra stamina drain per minute */
+  staminaDrain: number;
+  /** card probability multiplier */
+  card: number;
+  /** finishing quality multiplier on xG */
+  finish: number;
+  /** effective pressing bonus (instructions) */
+  press: number;
+  /** xG multiplier applied to shots this team faces */
+  faceXg: number;
+  /** effective attacking width shift */
+  width: number;
 }
 
 interface TeamSim {
@@ -59,6 +87,8 @@ interface TeamSim {
   xg: number;
   possessionTicks: number;
   mentality: "defensive" | "balanced" | "attacking";
+  mods: TeamMods;
+  penaltyTaker: number | null;
 }
 
 type WorkerInbound =
@@ -99,8 +129,66 @@ let injuries: number[] = [];
 const post = (msg: WorkerOutbound) => (self as unknown as Worker).postMessage(msg);
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
+/* ---------- tactical modifiers ---------- */
+function computeMods(cfg: MatchTeamConfig): TeamMods {
+  const s: TacticSliders = { ...NEUTRAL_SLIDERS, ...(cfg.sliders ?? {}) };
+  const m = cfg.mentality;
+  const mentAtt = m === "attacking" ? 1.06 : m === "defensive" ? 0.94 : 1;
+  const mentDef = m === "defensive" ? 1.06 : m === "attacking" ? 0.94 : 1;
+
+  // base slider influence (50 = neutral; ±50 maps to roughly ±12%)
+  const rel = (v: number) => 1 + (v - 50) * 0.0024;
+
+  let width = 0;
+  let press = 0;
+  let faceXg = 1;
+
+  const mods: TeamMods = {
+    att: rel((s.buildUpSpeed + s.chanceCreation) / 2) * rel(s.tempo) * mentAtt,
+    mid: rel((s.pressingIntensity + s.tempo) / 2),
+    def: rel(100 - s.defensiveLine) * rel(100 - s.aggression * 0.4) * mentDef,
+    staminaDrain:
+      (s.pressingIntensity - 50) * 0.0016 + (s.tempo - 50) * 0.0012 + (s.aggression - 50) * 0.0008,
+    card: 0.55 + s.aggression / 90,
+    finish: rel(s.chanceCreation) * rel(s.tempo * 0.5 + 50),
+    press,
+    faceXg,
+    width,
+  };
+
+  // per-player instruction effects
+  for (const p of cfg.players) {
+    const att = p.instr?.att;
+    const def = p.instr?.def;
+    if (att === "stay-wide") mods.width += 6;
+    if (att === "get-forward" || att === "overlap") {
+      mods.att *= 1.015;
+      mods.def *= 0.995;
+    }
+    if (att === "stay-back") {
+      mods.def *= 1.02;
+      mods.att *= 0.99;
+    }
+    if (att === "deep-playmaker") mods.mid *= 1.015;
+    if (att === "false-9") {
+      mods.mid *= 1.01;
+      mods.att *= 0.995;
+    }
+    if (def === "press-early") mods.press += 5;
+    if (def === "hold-line") mods.def *= 1.015;
+    if (def === "step-out") {
+      mods.def *= 0.995;
+      mods.press += 3;
+    }
+    if (def === "cover-wing") mods.width -= 3;
+    if (def === "sweeper-keeper") mods.faceXg *= 0.965;
+    if (def === "man-mark") mods.att *= 0.99; // opp attack — applied symmetrically below
+  }
+  return mods;
+}
+
 /* ---------- team preparation ---------- */
-function makeTeam(cfg: MatchTeamConfig, side: "home" | "away"): TeamSim {
+function makeTeam(cfg: MatchTeamConfig, side: "home" | "away", oppMods: TeamMods | null): TeamSim {
   const formation = getFormation(cfg.formation);
   const players: SimPlayer[] = cfg.players.map((p, i) => {
     const slot = formation.positions[i] ?? p.position;
@@ -120,8 +208,18 @@ function makeTeam(cfg: MatchTeamConfig, side: "home" | "away"): TeamSim {
       shots: 0,
       yellow: 0,
       sentOff: false,
+      instr: p.instr ?? {},
+      playStyles: new Set(p.playStyles ?? []),
     };
   });
+
+  const mods = computeMods(cfg);
+  // man-mark from the opponent dulls this team's attack
+  if (oppMods) {
+    const oppMarkers = cfg.players.filter((p) => p.instr?.def === "man-mark").length;
+    if (oppMarkers > 0) mods.att *= Math.max(0.94, 1 - oppMarkers * 0.02);
+  }
+
   return {
     side,
     cfg,
@@ -132,6 +230,8 @@ function makeTeam(cfg: MatchTeamConfig, side: "home" | "away"): TeamSim {
     xg: 0,
     possessionTicks: 0,
     mentality: cfg.mentality,
+    mods,
+    penaltyTaker: cfg.setPieces?.penalty ?? null,
   };
 }
 
@@ -140,22 +240,34 @@ const onPitch = (t: TeamSim) => t.players.filter((p) => !p.sentOff);
 function teamPower(t: TeamSim, zone: "att" | "mid" | "def"): number {
   const isAtt = (slot: string) => ["LW", "RW", "LF", "RF", "CF", "ST"].includes(slot);
   const isDef = (slot: string) => ["CB", "LB", "RB", "LWB", "RWB"].includes(slot);
+  const mods = t.mods;
   let sum = 0, w = 0;
   for (const p of onPitch(t)) {
     const staminaFactor = 0.72 + 0.28 * (p.staminaNow / 100);
-    const eff = p.ovr * staminaFactor;
+    let eff = p.ovr * staminaFactor;
+    // playstyle flavour
+    if (zone === "def" && (p.playStyles.has("rock") || p.playStyles.has("powerhouse"))) eff *= 1.03;
+    if (zone === "mid" && p.playStyles.has("maestro")) eff *= 1.02;
+
     if (zone === "att") {
-      const weight = isAtt(p.slot) ? 1.3 : isDef(p.slot) ? 0.15 : 0.45;
+      let weight = isAtt(p.slot) ? 1.3 : isDef(p.slot) ? 0.15 : 0.45;
+      if (p.instr.att === "get-forward" || p.instr.att === "overlap") weight += 0.25;
+      if (p.instr.att === "stay-back") weight *= 0.3;
+      weight *= 1 + mods.width / 400 * (["LW", "RW", "LM", "RM", "LWB", "RWB"].includes(p.slot) ? 2 : -0.4);
       sum += eff * weight; w += weight;
     } else if (zone === "mid") {
-      const weight = p.slot === "GK" ? 0.05 : isDef(p.slot) ? 0.55 : isAtt(p.slot) ? 0.5 : 1.4;
+      let weight = p.slot === "GK" ? 0.05 : isDef(p.slot) ? 0.55 : isAtt(p.slot) ? 0.5 : 1.4;
+      if (p.instr.att === "deep-playmaker" || p.instr.att === "free-roam") weight += 0.2;
       sum += eff * weight; w += weight;
     } else {
-      const weight = p.slot === "GK" ? 3.2 : isDef(p.slot) ? 1.35 : isAtt(p.slot) ? 0.12 : 0.5;
+      let weight = p.slot === "GK" ? 3.2 : isDef(p.slot) ? 1.35 : isAtt(p.slot) ? 0.12 : 0.5;
+      if (p.instr.att === "stay-back") weight += 0.2;
+      if (p.instr.def === "hold-line") weight += 0.1;
       sum += eff * weight; w += weight;
     }
   }
-  return w ? sum / w : 45;
+  const zoneMod = zone === "att" ? mods.att : zone === "mid" ? mods.mid : mods.def;
+  return w ? (sum / w) * zoneMod : 45;
 }
 
 function pickWeighted(players: SimPlayer[], weight: (p: SimPlayer) => number): SimPlayer | null {
@@ -196,25 +308,62 @@ function fill(tpl: string, p: SimPlayer): string {
   return tpl.replace("{p}", p.name);
 }
 
+/* ---------- shot resolution ---------- */
+function resolveShot(att: TeamSim, def: TeamSim, shooter: SimPlayer, dist: number, angleDeg: number, pressure: number, xgMult = 1): void {
+  const angleFactor = Math.sin((angleDeg * Math.PI) / 180);
+  const finishBonus = (1 + (shooter.attributes.shooting - 70) / 160) * att.mods.finish * (shooter.playStyles.has("clinical") ? 1.06 : 1);
+  const xg = Math.max(0.015, Math.min(0.72, 1.15 * Math.exp(-dist / 9.2) * (0.35 + 0.65 * angleFactor) * pressure * finishBonus * xgMult));
+  att.xg += xg;
+  const roll = rng();
+  if (roll < xg) {
+    att.goals++; shooter.goals++; shooter.rating += 1.0;
+    att.onTarget++;
+    const assister = pickWeighted(onPitch(att).filter((p) => p.id !== shooter.id), (p) => {
+      let w = Math.pow(Math.max(1, p.attributes.passing * 0.7 + p.ovr * 0.3), 2);
+      if (p.playStyles.has("playmaker")) w *= 1.25;
+      if (p.instr.att === "false-9" || p.instr.att === "free-roam") w *= 1.2;
+      return w;
+    });
+    if (assister && rng() < 0.68) {
+      assister.assists++; assister.rating += 0.6;
+      events.push({ minute, type: "goal", teamSide: att.side, text: `${assister.name} sets it up — ${fill(GOAL_TXT[Math.floor(rng() * GOAL_TXT.length)], shooter)}` });
+    } else {
+      events.push({ minute, type: "goal", teamSide: att.side, text: fill(GOAL_TXT[Math.floor(rng() * GOAL_TXT.length)], shooter) });
+    }
+    for (const p of def.players) p.rating -= 0.04;
+    for (const p of att.players) p.rating += 0.05;
+  } else if (roll < xg + 0.36) {
+    att.onTarget++;
+    const gk = onPitch(def).find((p) => p.slot === "GK");
+    if (gk && rng() < 0.75) gk.rating += 0.12;
+    events.push({ minute, type: "save", teamSide: att.side, text: fill(SAVE_TXT[Math.floor(rng() * SAVE_TXT.length)].replace("{g}", gk?.name ?? "the keeper"), shooter) });
+  } else {
+    events.push({ minute, type: "miss", teamSide: att.side, text: fill(MISS_TXT[Math.floor(rng() * MISS_TXT.length)], shooter) });
+    shooter.rating -= 0.05;
+  }
+}
+
 /* ---------- minute simulation ---------- */
 function simulateMinute(): void {
   const h = home!, a = away!;
   minute++;
 
-  // possession battle (mentality shifts)
-  const hMid = teamPower(h, "mid") * (h.mentality === "attacking" ? 1.08 : h.mentality === "defensive" ? 0.94 : 1);
-  const aMid = teamPower(a, "mid") * (a.mentality === "attacking" ? 1.08 : a.mentality === "defensive" ? 0.94 : 1);
+  // possession battle (mentality, pressing & tempo shifts)
+  const hMid = teamPower(h, "mid") * (1 + h.mods.press / 500);
+  const aMid = teamPower(a, "mid") * (1 + a.mods.press / 500);
   const hShare = Math.pow(hMid, 1.35) / (Math.pow(hMid, 1.35) + Math.pow(aMid, 1.35));
   const homeHasBall = rng() < hShare;
   const att = homeHasBall ? h : a;
   const def = homeHasBall ? a : h;
   att.possessionTicks++;
 
-  // stamina drain (per spec: base * workrate * distance)
+  // stamina drain: base load + tactical intensity + playstyle economy
   for (const t of [h, a]) {
     for (const p of t.players) {
       if (p.sentOff) continue;
-      const drain = 0.34 + (100 - p.staminaAttr) / 100 * 0.38 + (t.mentality === "attacking" ? 0.05 : 0);
+      let drain = 0.34 + (100 - p.staminaAttr) / 100 * 0.38 + t.mods.staminaDrain + (t.mentality === "attacking" ? 0.05 : 0);
+      if (p.playStyles.has("engine")) drain *= 0.88;
+      else if (p.playStyles.has("rapid")) drain *= 0.93;
       p.staminaNow = Math.max(15, p.staminaNow - drain);
     }
   }
@@ -222,52 +371,47 @@ function simulateMinute(): void {
   // chance creation
   const attPower = teamPower(att, "att");
   const defPower = teamPower(def, "def");
-  const chanceProb = Math.min(0.30, Math.max(0.03, 0.115 * Math.pow(attPower / defPower, 2.4)));
+  const chanceProb = Math.min(0.32, Math.max(0.03, 0.115 * Math.pow(attPower / defPower, 2.4)));
 
   if (rng() < chanceProb) {
-    const shooter = pickWeighted(onPitch(att), (p) =>
-      p.slot === "GK" ? 0.01 : Math.pow(Math.max(1, p.attributes.shooting * 0.6 + p.attributes.dribbling * 0.25 + p.ovr * 0.15), 2.2));
-    if (shooter) {
-      shooter.shots++; att.shots++;
-      const dist = 5 + Math.pow(rng(), 1.4) * 22; // 5-27m
-      const angleDeg = 12 + rng() * 58; // degrees
-      const angleFactor = Math.sin((angleDeg * Math.PI) / 180);
-      const pressure = 0.6 + rng() * 0.5;
-      const finishBonus = 1 + (shooter.attributes.shooting - 70) / 160;
-      const xg = Math.max(0.015, Math.min(0.7, 1.15 * Math.exp(-dist / 9.2) * (0.35 + 0.65 * angleFactor) * pressure * finishBonus));
-      att.xg += xg;
-      const roll = rng();
-      if (roll < xg) {
-        // GOAL
-        att.goals++; shooter.goals++; shooter.rating += 1.0;
-        att.onTarget++;
-        const assister = pickWeighted(onPitch(att).filter((p) => p.id !== shooter.id), (p) =>
-          Math.pow(Math.max(1, p.attributes.passing * 0.7 + p.ovr * 0.3), 2));
-        if (assister && rng() < 0.68) {
-          assister.assists++; assister.rating += 0.6;
-          events.push({ minute, type: "goal", teamSide: att.side, text: `${assister.name} sets it up — ${fill(GOAL_TXT[Math.floor(rng() * GOAL_TXT.length)], shooter)}` });
-        } else {
-          events.push({ minute, type: "goal", teamSide: att.side, text: fill(GOAL_TXT[Math.floor(rng() * GOAL_TXT.length)], shooter) });
-        }
-        // conceding team morale dent
-        for (const p of def.players) p.rating -= 0.04;
-        for (const p of att.players) p.rating += 0.05;
-      } else if (roll < xg + 0.36) {
-        // SAVED (on target)
-        att.onTarget++;
-        const gk = onPitch(def).find((p) => p.slot === "GK");
-        if (gk && rng() < 0.75) gk.rating += 0.12;
-        events.push({ minute, type: "save", teamSide: att.side, text: fill(SAVE_TXT[Math.floor(rng() * SAVE_TXT.length)].replace("{g}", gk?.name ?? "the keeper"), shooter) });
-      } else {
-        events.push({ minute, type: "miss", teamSide: att.side, text: fill(MISS_TXT[Math.floor(rng() * MISS_TXT.length)], shooter) });
-        shooter.rating -= 0.05;
+    // PENALTY! (foul in the box) — the designated taker steps up
+    if (rng() < 0.035) {
+      const taker =
+        onPitch(att).find((p) => p.id === att.penaltyTaker) ??
+        pickWeighted(onPitch(att), (p) => (p.slot === "GK" ? 0.01 : Math.pow(Math.max(1, p.attributes.shooting), 2.4)));
+      if (taker) {
+        taker.shots++; att.shots++;
+        events.push({ minute, type: "info", teamSide: att.side, text: `PENALTY to ${att.cfg.shortName}! ${taker.name} places the ball on the spot...` });
+        resolveShot(att, def, taker, 9, 24, 1, 1.55);
+      }
+    } else {
+      const shooter = pickWeighted(onPitch(att), (p) => {
+        if (p.slot === "GK") return 0.01;
+        let w = Math.pow(Math.max(1, p.attributes.shooting * 0.6 + p.attributes.dribbling * 0.25 + p.ovr * 0.15), 2.2);
+        const ia = p.instr.att;
+        if (ia === "get-in-behind") w *= 1.4;
+        if (ia === "cut-inside") w *= 1.2;
+        if (ia === "stay-wide") w *= 1.15;
+        if (ia === "come-short") w *= 0.85;
+        if (ia === "false-9") w *= 0.8;
+        if (p.playStyles.has("maestro")) w *= 1.1;
+        return w;
+      });
+      if (shooter) {
+        shooter.shots++; att.shots++;
+        let dist = 5 + Math.pow(rng(), 1.4) * 22; // 5-27m
+        if (shooter.instr.att === "get-in-behind") dist = Math.max(5, dist - 2);
+        const angleDeg = 12 + rng() * 58;
+        // defensive line & width: a high press leaves space; a deep block crowds the box
+        const pressure = Math.max(0.35, Math.min(1.25, (0.6 + rng() * 0.5) * (1 - (def.cfg.sliders?.defensiveLine ?? 50) * 0.0012) * (1 + def.mods.width / 900)));
+        resolveShot(att, def, shooter, dist, angleDeg, pressure, def.mods.faceXg);
       }
     }
   }
 
-  // cards
+  // cards (aggression slider raises the stakes)
   for (const t of [h, a]) {
-    if (rng() < 0.0175) {
+    if (rng() < 0.0175 * t.mods.card) {
       const p = pickWeighted(onPitch(t), (p) => (p.slot === "GK" ? 0.05 : p.position === "CB" || p.position === "CDM" ? 1.6 : 1));
       if (p) {
         p.yellow++;
@@ -376,8 +520,11 @@ async function run(): Promise<void> {
 
 function begin(fixture: number, hCfg: MatchTeamConfig, aCfg: MatchTeamConfig, spd: number) {
   fixtureId = fixture;
-  home = makeTeam(hCfg, "home");
-  away = makeTeam(aCfg, "away");
+  // build home first without an opponent, then rebuild pairs so man-mark is symmetric
+  const awayMods = computeMods(aCfg);
+  home = makeTeam(hCfg, "home", awayMods);
+  const homeMods = home.mods;
+  away = makeTeam(aCfg, "away", homeMods);
   minute = 0;
   events = [{ minute: 0, type: "ko", teamSide: "neutral", text: `Kick-off at ${hCfg.name}! ${hCfg.shortName} vs ${aCfg.shortName}.` }];
   speed = spd;

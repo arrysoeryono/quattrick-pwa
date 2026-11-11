@@ -9,6 +9,7 @@ import { DatabaseManagerModal } from "@/components/database-manager-modal";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { formatDate } from "@/lib/format";
+import { generateDefaultDataset } from "@/lib/game/defaultData";
 import { Cloud, CloudOff, Database, Download, FileSpreadsheet, HardDrive, LogOut, RefreshCw, Save, Trash2, Upload } from "lucide-react";
 
 export function MoreTab() {
@@ -201,13 +202,42 @@ export function MoreTab() {
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
+        <AlertDialog>
+          <AlertDialogTrigger asChild>
+            <Button variant="outline" className="mt-2 w-full h-10 border-rose-500/40 text-rose-300 hover:bg-rose-500/10">
+              <RefreshCw className="h-4 w-4 mr-1.5" aria-hidden />
+              Regenerate world database
+            </Button>
+          </AlertDialogTrigger>
+          <AlertDialogContent className="max-w-[380px]">
+            <AlertDialogHeader>
+              <AlertDialogTitle>Regenerate the player database?</AlertDialogTitle>
+              <AlertDialogDescription>
+                Builds a fresh 10-club world including the new LWB / RWB / CDM depth chart. Existing saves stay untouched — new squads appear when you start or reload careers.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                className="bg-rose-600 hover:bg-rose-500"
+                onClick={() => {
+                  void importDataset(generateDefaultDataset(), "builtin");
+                  setBusyMsg("World regenerated — new careers use the updated database");
+                  setTimeout(() => setBusyMsg(null), 4000);
+                }}
+              >
+                Regenerate
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </section>
 
       {/* about */}
       <section aria-label="About" className="rounded-xl border border-slate-800 bg-slate-950/40 p-3 text-center">
         <p className="text-xs font-bold text-slate-300">Quattrick Football Manager</p>
         <p className="text-[10px] text-slate-500 mt-0.5">
-          v3.0 Master Edition · Next.js PWA · Dexie offline engine · Neon Postgres cloud · Web Worker match sim
+          v4.0 Master Edition · Next.js PWA · Dexie offline engine · Neon Postgres cloud · Web Worker match sim
         </p>
         <p className="text-[10px] text-slate-600 mt-1">Season {game.season} · Manager {game.managerName}</p>
       </section>

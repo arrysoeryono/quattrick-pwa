@@ -1,7 +1,9 @@
 import type { Dataset, Fixture, TableRow, TeamRow } from "./types";
 import { mulberry32 } from "./defaultData";
 import { getFormation, positionAffinity } from "./formations";
-import type { MatchTeamConfig, PlayerState } from "./types";
+import type { MatchTeamConfig, Mentality, PlayerState } from "./types";
+import { aiSlidersFor } from "./tacticPresets";
+import { computePlayStyles } from "./development";
 
 /** Double round-robin (circle method). Returns 2*(n-1) rounds, weekly dates. */
 export function generateFixtures(teamIds: number[], seasonStart: Date): Fixture[] {
@@ -142,7 +144,7 @@ export function estimateClubStrength(dataset: Dataset, teamId: number): number {
 }
 
 /** Builds a MatchTeamConfig for AI clubs straight from the dataset (auto best-XI for formation). */
-export function buildAiTeamConfig(dataset: Dataset, team: TeamRow, formationName: string): MatchTeamConfig {
+export function buildAiTeamConfig(dataset: Dataset, team: TeamRow, formationName: string, mentality: Mentality = "balanced"): MatchTeamConfig {
   const formation = getFormation(formationName);
   const squad = dataset.players
     .filter((p) => p.teamId === team.id)
@@ -179,6 +181,7 @@ export function buildAiTeamConfig(dataset: Dataset, team: TeamRow, formationName
       sharpness: 70,
       morale: 60,
       age: pick.age,
+      playStyles: computePlayStyles(pick).map((s) => s.id),
     });
   });
   return {
@@ -186,7 +189,8 @@ export function buildAiTeamConfig(dataset: Dataset, team: TeamRow, formationName
     name: team.name,
     shortName: team.shortName,
     formation: formationName,
-    mentality: "balanced",
+    mentality,
+    sliders: aiSlidersFor(formation.category, mentality),
     players,
   };
 }
