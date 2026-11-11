@@ -67,12 +67,46 @@ export interface WeeklyTrainingResult {
   staminaDelta: number;
 }
 
+/* ---------------- v4.3 Evolution paths (FIFA-style archetypes) ---------------- */
+
+export interface DevPathDef {
+  id: string;
+  name: string;
+  desc: string;
+  attrs: (keyof PlayerAttributes)[];
+  groups: ("GK" | "DEF" | "MID" | "ATT")[];
+}
+
+export const DEV_PATHS: DevPathDef[] = [
+  { id: "poacher", name: "Poacher", desc: "Lives in the box. Finishing and strength above all.", attrs: ["shooting", "physical"], groups: ["ATT"] },
+  { id: "complete-forward", name: "Complete Forward", desc: "All-round attacker — every attribute grows.", attrs: ["shooting", "pace", "dribbling", "passing", "physical"], groups: ["ATT"] },
+  { id: "dribbler", name: "Dribbler", desc: "Slaloming winger who beats anyone one-on-one.", attrs: ["dribbling", "pace"], groups: ["ATT", "MID"] },
+  { id: "playmaker", name: "Playmaker", desc: "The passing hub everything flows through.", attrs: ["passing", "dribbling"], groups: ["MID"] },
+  { id: "engine", name: "Engine", desc: "Box-to-box monster with endless legs.", attrs: ["physical", "pace"], groups: ["MID", "DEF"] },
+  { id: "sniper", name: "Sniper", desc: "Late runner who arrives shooting from range.", attrs: ["shooting", "pace"], groups: ["MID"] },
+  { id: "stopper", name: "Stopper", desc: "Aggressive, dominant, wins every duel.", attrs: ["physical", "defending"], groups: ["DEF"] },
+  { id: "ball-player", name: "Ball-Playing Defender", desc: "Steps out and starts attacks from the back.", attrs: ["passing", "defending"], groups: ["DEF"] },
+  { id: "speedster", name: "Speedster", desc: "Recovery pace to burn — nothing gets behind.", attrs: ["pace", "defending"], groups: ["DEF"] },
+  { id: "shot-stopper", name: "Shot Stopper", desc: "Reflex saves, commands his six-yard box.", attrs: ["physical", "defending"], groups: ["GK"] },
+  { id: "sweeper-keeper", name: "Sweeper Keeper", desc: "Distribution and footwork — an eleventh outfielder.", attrs: ["passing", "pace"], groups: ["GK"] },
+];
+
+export function devPathsFor(player: { position: PositionCode }): DevPathDef[] {
+  const g = positionGroup(player.position);
+  return DEV_PATHS.filter((p) => p.groups.includes(g));
+}
+
+export function canChooseDevPath(player: PlayerState): boolean {
+  return player.age <= 23 && player.potential >= 80 && !player.devPath;
+}
+
 /** Growth engine: raises attributes toward potential under the player's training plan. */
 export function weeklyDevelopment(
   player: PlayerState,
   playedMinutes: number, // 0-90 this week (0 = did not play)
   coachQuality = 1.0, // 1.05 Novice / 1.15 Accomplished / 1.30 Expert
   rng: () => number = Math.random,
+  mentor?: PlayerState | null, // v4.3 mentorship — shapes attribute choice
 ): WeeklyTrainingResult {
   const plan = player.trainingPlan ?? { focus: "balanced", intensity: "normal" };
   const intensity = INTENSITY_META[plan.intensity] ?? INTENSITY_META.normal;
@@ -87,14 +121,22 @@ export function weeklyDevelopment(
     const baseXp = 1.6;
     // position retraining consumes half the weekly development budget
     const retrainPenalty = player.retrain ? 0.5 : 1;
-    xp = baseXp * ageF * sharpBonus * coachQuality * playtime * intensity.xpMult * retrainPenalty;
+    // evolution path focus adds a small XP bonus
+    const pathBonus = player.devPath ? 1.1 : 1;
+    // mentorship grants +25% XP
+    const mentorBonus = mentor ? 1.25 : 1;
+    xp = baseXp * ageF * sharpBonus * coachQuality * playtime * intensity.xpMult * retrainPenalty * pathBonus * mentorBonus;
     // Convert XP into attribute points probabilistically (1 attribute tick = 1 point)
     const chance = Math.min(0.95, xp / 3.2);
     if (rng() < chance) {
       const attrs: (keyof PlayerAttributes)[] = ["pace", "shooting", "passing", "dribbling", "defending", "physical"];
       const focusPool = FOCUS_POOL[plan.focus];
+      const path = player.devPath ? DEV_PATHS.find((d) => d.id === player.devPath) : null;
       let pool: (keyof PlayerAttributes)[];
-      if (plan.focus === "balanced" || !focusPool) {
+      if (path && rng() < 0.55) {
+        // evolution path dominates half the growth signals
+        pool = [path.attrs[Math.floor(rng() * path.attrs.length)]];
+      } else if (plan.focus === "balanced" || !focusPool) {
         // balanced: weigh toward the position's key attributes
         const key = keyAttributes(player.position);
         pool = rng() < 0.65 ? key : attrs;
@@ -114,6 +156,38 @@ export function weeklyDevelopment(
     injury: headroom > 0 && intensity.injuryRisk > 0 && rng() < intensity.injuryRisk,
     staminaDelta: intensity.staminaDelta,
   };
+}
+
+/* ---------------- v4.3 Mentorship ---------------- */
+
+export const MENTOR_WEEKS = 12;
+
+export function canBeMentor(m: PlayerState, mentee: PlayerState): boolean {
+  return m.id !== mentee.id && m.age >= 30 && m.overallRating > mentee.overallRating;
+}
+
+export function canBeMentee(mentee: PlayerState): boolean {
+  return mentee.age <= 21 && !mentee.mentor;
+}
+
+/** Weekly mentor tick: mentee XP is handled in weeklyDevelopment; this occasionally
+ *  copies one point of a mentor key attribute and decays the countdown. */
+export function tickMentorship(mentee: PlayerState, mentor: PlayerState | null, rng: () => number): boolean {
+  if (!mentee.mentor || !mentor) return false;
+  mentee.mentor.weeksLeft -= 1;
+  if (rng() < 0.3) {
+    const keys = keyAttributes(mentor.position);
+    const attr = keys[Math.floor(rng() * keys.length)];
+    if (mentee.attributes[attr] < Math.min(99, mentor.attributes[attr])) {
+      mentee.attributes = { ...mentee.attributes, [attr]: mentee.attributes[attr] + 1 };
+      recomputeOverall(mentee);
+    }
+  }
+  if (mentee.mentor.weeksLeft <= 0) {
+    mentee.mentor = null;
+    return true;
+  }
+  return false;
 }
 
 const OVR_WEIGHTS: Record<PositionCode, Partial<Record<keyof PlayerAttributes, number>>> = {

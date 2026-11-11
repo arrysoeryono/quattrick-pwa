@@ -102,20 +102,24 @@ export interface PlayerState extends PlayerRow {
   retrain: RetrainState | null;
   seasonStats: SeasonStats;
   careerStats: { apps: number; goals: number; assists: number };
+  devPath: string | null; // v4.3 evolution archetype id
+  mentor: Mentorship | null; // v4.3 being mentored
 }
 
 export interface Fixture {
   id: number;
-  round: number; // 1-based
+  round: number; // 1-based; cup rounds use 100 (QF), 101 (SF), 102 (Final)
   date: string; // ISO yyyy-mm-dd
   homeId: number;
   awayId: number;
   played: boolean;
   homeGoals: number | null;
   awayGoals: number | null;
+  competition?: "league" | "cup"; // absent = league (legacy saves)
+  tieLabel?: string; // e.g. "Quarter-final", "Semi-final", "Final"
 }
 
-export type NewsType = "match" | "transfer" | "injury" | "finance" | "season" | "award";
+export type NewsType = "match" | "transfer" | "injury" | "finance" | "season" | "award" | "social" | "board" | "cup";
 
 export interface NewsItem {
   id: string;
@@ -148,6 +152,15 @@ export interface MatchStats {
   xg: [number, number];
 }
 
+/** Single shot record for the post-match xG timeline / shot map. */
+export interface ShotLogEntry {
+  minute: number;
+  side: "home" | "away";
+  xg: number;
+  scored: boolean;
+  shooter?: string;
+}
+
 export interface MatchResult {
   fixtureId: number;
   homeId: number;
@@ -159,9 +172,19 @@ export interface MatchResult {
   stats: MatchStats;
   injuries: number[]; // playerIds (user squad only) that got injured
   motmPlayerId: number | null;
+  shotLog?: ShotLogEntry[]; // optional for legacy workers
+  momentum?: number; // final momentum -100 (away) .. 100 (home)
 }
 
 export type Mentality = "defensive" | "balanced" | "attacking";
+
+export type Difficulty = "amateur" | "pro" | "legend";
+
+export const DIFFICULTY_META: Record<Difficulty, { label: string; desc: string; aiBoost: number; prizeMult: number }> = {
+  amateur: { label: "Amateur", desc: "Relaxed — weaker rivals, richer prize money.", aiBoost: -3, prizeMult: 1.2 },
+  pro: { label: "Pro", desc: "The intended experience. Fair fights.", aiBoost: 0, prizeMult: 1 },
+  legend: { label: "Legend", desc: "Rivals sharpen up, budgets tighten. Brutal.", aiBoost: 3, prizeMult: 0.9 },
+};
 
 /** FIFA-style tactical sliders (1-100). Applied inside the match engine. */
 export interface TacticSliders {
@@ -211,6 +234,64 @@ export interface SeasonHistoryEntry {
   trophies: string[];
 }
 
+/** v4.1 — AI-vs-AI transfer to keep the world alive. */
+export interface AITransferRecord {
+  id: string;
+  season: number;
+  week: number;
+  playerId: number;
+  playerName: string;
+  fromTeamId: number;
+  toTeamId: number;
+  fee: number;
+  deadlineDay: boolean;
+}
+
+/** v4.1 — interactive player conversation (playtime, contract, transfer bid). */
+export interface InboxOption {
+  id: string;
+  label: string;
+}
+
+export interface InboxMessage {
+  id: string;
+  date: string;
+  kind: "playtime" | "contract" | "bid" | "unhappy";
+  playerId: number | null;
+  playerName: string;
+  title: string;
+  body: string;
+  options: InboxOption[];
+  resolvedOptionId?: string;
+  outcome?: string;
+  /** pending transfer bid amount (kind === "bid") */
+  bidAmount?: number;
+  bidTeamId?: number;
+}
+
+/** v4.1 — Quattrick Social (parody fan/press feed). */
+export interface SocialPost {
+  id: string;
+  date: string;
+  handle: string;
+  tag: string;
+  text: string;
+  tone: "hype" | "mock" | "news" | "neutral";
+  likes: number;
+}
+
+/** v4.3 — youth evolution path (FIFA-style archetype). */
+export interface Mentorship {
+  mentorId: number;
+  weeksLeft: number;
+  totalWeeks: number;
+}
+
+export interface SeasonObjective {
+  targetPosition: number;
+  cupTarget: "win" | "final" | "none";
+}
+
 /** Full serialized save — stored in Dexie + Neon JSONB. */
 export interface GameState {
   version: number;
@@ -227,9 +308,27 @@ export interface GameState {
   lineup: (number | null)[]; // aligned to formation.positions
   fixtures: Fixture[]; // user's league fixtures (all clubs)
   news: NewsItem[];
-  seasonObjective: { targetPosition: number };
+  seasonObjective: SeasonObjective;
   history: SeasonHistoryEntry[];
   lastRoundResults: { homeId: number; awayId: number; homeGoals: number; awayGoals: number }[];
+
+  /* ---- v4.x career expansion ---- */
+  difficulty: Difficulty;
+  boardConfidence: number; // 0-100
+  managerRep: number; // 0-100 career reputation
+  inbox: InboxMessage[]; // pending player conversations
+  social: SocialPost[]; // fan/press buzz feed
+  aiTransfers: AITransferRecord[];
+  scoutedIds: number[]; // market players with revealed attributes
+  scoutingQueue: { playerId: number; weeksLeft: number }[];
+  facilityLevel: number; // 1-5 youth academy
+  achievements: { id: string; date: string }[];
+  soundEnabled: boolean;
+  sacked: boolean;
+  winStreak: number;
+  unbeatenRun: number;
+  cleanSheetRun: number;
+  seasonShots: number; // simple career counters for achievements
 }
 
 export interface SaveRecord {
@@ -262,6 +361,8 @@ export interface LiveMatchSnapshot {
   awayGoals: number;
   events: MatchEventLog[];
   stats: MatchStats;
+  momentum?: number; // -100 (away storms) .. 100 (home storms)
+  shoutsLeft?: number;
 }
 
 export interface MatchTeamConfig {
@@ -272,6 +373,7 @@ export interface MatchTeamConfig {
   mentality: Mentality;
   sliders?: TacticSliders;
   setPieces?: Partial<SetPieceAssignments>;
+  isDerby?: boolean; // v4.4 rivalry intensity
   /** 11 starters aligned to formation slots */
   players: {
     id: number;

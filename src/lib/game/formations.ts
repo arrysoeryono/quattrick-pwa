@@ -36,6 +36,9 @@ export const FORMATIONS: Formation[] = [
   f("4-5-1 Flat", "Midfield Control", 4, ["GK", "RB", "CB", "CB", "LB", "RM", "CM", "CM", "CM", "LM", "ST"]),
   f("4-5-1 Attack", "Heavy Attacking Midfield", 4, ["GK", "RB", "CB", "CB", "LB", "CM", "RM", "CAM", "CAM", "LM", "ST"]),
   f("4-2-4", "Ultra Attacking", 4, ["GK", "RB", "CB", "CB", "LB", "CM", "CM", "RW", "LW", "ST", "ST"]),
+  f("4-4-1-1 Classic", "Balanced Strike Pair", 4, ["GK", "RB", "CB", "CB", "LB", "RM", "CM", "CM", "LM", "CF", "ST"]),
+  f("4-3-1-2 Strike", "Central Strike Pair", 4, ["GK", "RB", "CB", "CB", "LB", "CDM", "CM", "CM", "CAM", "CF", "ST"]),
+  f("4-4-2 Diamond CF", "Diamond Control", 4, ["GK", "RB", "CB", "CB", "LB", "CDM", "RM", "LM", "CAM", "CF", "ST"]),
   // ---------------- Back 3 ----------------
   f("3-5-2", "Balanced Wing Control", 3, ["GK", "CB", "CB", "CB", "CDM", "CDM", "RM", "LM", "CAM", "ST", "ST"]),
   f("3-4-1-2", "Attacking Midfield", 3, ["GK", "CB", "CB", "CB", "CM", "CM", "RM", "LM", "CAM", "ST", "ST"]),

@@ -21,8 +21,12 @@ export interface TickPayload {
     };
     homeName: string;
     awayName: string;
+    momentum?: number;
+    shoutsLeft?: number;
   };
 }
+
+export type ShoutId = "go-all-out" | "park-the-bus" | "press-hard" | "time-waste";
 
 export interface MatchRunnerCallbacks {
   onTick?: (payload: TickPayload) => void;
@@ -50,9 +54,13 @@ export class MatchRunner {
     return this.worker;
   }
 
-  start(fixtureId: number, home: MatchTeamConfig, away: MatchTeamConfig, speed = 1): void {
+  start(fixtureId: number, home: MatchTeamConfig, away: MatchTeamConfig, speed = 1, userTeamId?: number): void {
     const w = this.ensureWorker();
-    w.postMessage({ type: "start", fixtureId, home, away, speed });
+    w.postMessage({ type: "start", fixtureId, home, away, speed, userTeamId });
+  }
+
+  shout(id: ShoutId): void {
+    this.worker?.postMessage({ type: "shout", id });
   }
 
   setSpeed(speed: number): void {

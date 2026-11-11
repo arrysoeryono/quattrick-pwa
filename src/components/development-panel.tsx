@@ -14,17 +14,22 @@ import { COACH_LEVELS, coachMultiplier } from "@/lib/game/advance";
 import {
   FOCUS_POOL,
   INTENSITY_META,
+  MENTOR_WEEKS,
   PLAYSTYLES,
   TRAINING_FOCUSES,
+  canBeMentor,
+  canBeMentee,
+  canChooseDevPath,
   canStartRetrain,
   computePlayStyles,
+  devPathsFor,
   eligibleRetrainTargets,
   startRetrain,
 } from "@/lib/game/development";
 import { getFormation } from "@/lib/game/formations";
 import { effectiveOvr } from "@/lib/game/tactics";
 import { cn } from "@/lib/utils";
-import { Dumbbell, GraduationCap, Repeat, Star } from "lucide-react";
+import { Dumbbell, GraduationCap, GitBranch, Repeat, Star, Users } from "lucide-react";
 import type { PlayerState, TrainingFocus, TrainingIntensity } from "@/lib/game/types";
 
 const FOCUS_LABEL: Record<TrainingFocus, string> = {
@@ -71,6 +76,25 @@ export function DevelopmentPanel({ player }: { player: PlayerState }) {
     });
   };
 
+  const choosePath = (pathId: string) => {
+    update((g) => {
+      const p = g.players.find((x) => x.id === player.id);
+      if (p) p.devPath = pathId;
+    });
+  };
+
+  const assignMentor = (mentorId: number) => {
+    update((g) => {
+      const p = g.players.find((x) => x.id === player.id);
+      if (p) p.mentor = { mentorId, weeksLeft: MENTOR_WEEKS, totalWeeks: MENTOR_WEEKS };
+    });
+  };
+
+  const paths = canChooseDevPath(player) ? devPathsFor(player) : [];
+  const mentors = canBeMentee(player)
+    ? game.players.filter((m) => canBeMentor(m, player)).sort((a, b) => b.overallRating - a.overallRating).slice(0, 3)
+    : [];
+
   return (
     <div className="space-y-4">
       {/* playstyles */}
@@ -110,6 +134,35 @@ export function DevelopmentPanel({ player }: { player: PlayerState }) {
           </p>
         )}
       </section>
+
+      {/* v4.3 evolution path */}
+      {paths.length > 0 && (
+        <section aria-label="Evolution path">
+          <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 mb-2 flex items-center gap-1.5">
+            <GitBranch className="h-3.5 w-3.5" aria-hidden /> Evolution path — choose once, forever
+          </p>
+          <div className="space-y-1.5">
+            {paths.map((path) => (
+              <button
+                key={path.id}
+                type="button"
+                onClick={() => choosePath(path.id)}
+                className="w-full rounded-lg border border-slate-800 bg-slate-950/40 p-2.5 text-left hover:border-emerald-600/50 transition-colors"
+                aria-label={`Choose ${path.name} path`}
+              >
+                <p className="text-xs font-bold text-slate-100">{path.name}</p>
+                <p className="text-[10px] text-slate-500">{path.desc}</p>
+                <p className="text-[10px] text-emerald-400 mt-0.5">Boosts: {path.attrs.join(" + ")} · +10% XP</p>
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
+      {player.devPath && (
+        <p className="text-[10px] text-emerald-400 flex items-center gap-1">
+          <GitBranch className="h-3 w-3" aria-hidden /> Evolution: {player.devPath.replace("-", " ")} (locked in)
+        </p>
+      )}
 
       {/* training plan */}
       <section aria-label="Training plan">
@@ -204,6 +257,45 @@ export function DevelopmentPanel({ player }: { player: PlayerState }) {
               </button>
             ))}
           </div>
+        )}
+      </section>
+
+      {/* v4.3 mentorship */}
+      <section aria-label="Mentorship">
+        <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 mb-2 flex items-center gap-1.5">
+          <Users className="h-3.5 w-3.5" aria-hidden /> Mentorship
+        </p>
+        {player.mentor ? (
+          (() => {
+            const m = game.players.find((x) => x.id === player.mentor!.mentorId);
+            return (
+              <div className="rounded-lg border border-sky-500/40 bg-sky-500/5 p-2.5">
+                <p className="text-xs font-semibold text-sky-300">Learning from {m?.name ?? "veteran"}</p>
+                <Progress value={((player.mentor.totalWeeks - player.mentor.weeksLeft) / player.mentor.totalWeeks) * 100} className="mt-2 h-1.5" aria-label="Mentorship progress" />
+                <p className="text-[10px] text-slate-500 mt-1.5">{player.mentor.weeksLeft} weeks left · +25% XP · absorbs veteran attributes</p>
+              </div>
+            );
+          })()
+        ) : mentors.length > 0 ? (
+          <div className="space-y-1.5">
+            <p className="text-[10px] text-slate-600">Pair with a veteran (30+, higher OVR) for {MENTOR_WEEKS} weeks of boosted growth:</p>
+            {mentors.map((m) => (
+              <button
+                key={m.id}
+                type="button"
+                onClick={() => assignMentor(m.id)}
+                className="w-full flex items-center justify-between rounded-lg border border-slate-800 bg-slate-950/40 p-2 hover:border-sky-600/50 transition-colors"
+                aria-label={`Assign ${m.name} as mentor`}
+              >
+                <span className="text-xs font-semibold text-slate-200">{m.name}</span>
+                <span className="text-[10px] text-slate-500">{m.age}y · OVR {m.overallRating}</span>
+              </button>
+            ))}
+          </div>
+        ) : (
+          <p className="text-xs text-slate-600">
+            {player.age > 21 ? "Mentorship is for players 21 or younger." : "No eligible veterans available."}
+          </p>
         )}
       </section>
 

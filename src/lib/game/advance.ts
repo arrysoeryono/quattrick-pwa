@@ -1,5 +1,6 @@
 import type {
   Dataset,
+  Difficulty,
   GameState,
   MatchResult,
   NewsItem,
@@ -7,6 +8,7 @@ import type {
   PlayerState,
   TeamRow,
 } from "./types";
+import { DIFFICULTY_META } from "./types";
 import { computeTable, estimateClubStrength, generateFixtures, quickSimulateScore } from "./season";
 import { getFormation } from "./formations";
 import {
@@ -19,11 +21,34 @@ import {
   recomputeOverall,
   shouldRetire,
   tickRetrain,
+  tickMentorship,
   weeklyDevelopment,
 } from "./development";
 import { computeMarketValue, computeSalary, mulberry32 } from "./defaultData";
 import { autoPickLineup } from "./tactics";
 import { defaultTactics, migrateTactics } from "./tacticPresets";
+import {
+  ACHIEVEMENTS,
+  academyIntake,
+  applyBoardResult,
+  applyCupProgression,
+  cupChampion,
+  cupTargetFor,
+  drawCupRound1,
+  fixtureWeek,
+  progressCup,
+  pushNews,
+  pushSocial,
+  resolveInboxMessage,
+  runTransferWorld,
+  seasonBoardReview,
+  socialAfterMatch,
+  tickScouting,
+  uid,
+  unlockAchievement,
+  userCupOutcome,
+  isDerbyFixture,
+} from "./career";
 
 const rng = mulberry32(Date.now() & 0xffffffff);
 
@@ -51,10 +76,6 @@ function isoDate(d: Date): string {
   return d.toISOString().slice(0, 10);
 }
 
-function uid(): string {
-  return `${Date.now().toString(36)}-${Math.floor(Math.random() * 1e9).toString(36)}`;
-}
-
 function toPlayerState(p: PlayerRow): PlayerState {
   return {
     ...p,
@@ -69,6 +90,8 @@ function toPlayerState(p: PlayerRow): PlayerState {
     retrain: null,
     seasonStats: { apps: 0, goals: 0, assists: 0, ratingSum: 0, cleanSheets: 0 },
     careerStats: { apps: 0, goals: 0, assists: 0 },
+    devPath: null,
+    mentor: null,
   };
 }
 
@@ -80,13 +103,15 @@ function objectiveFor(reputation: number, teamsCount: number): number {
   return Math.max(6, teamsCount - 2);
 }
 
-export function createCareerState(managerName: string, clubId: number, dataset: Dataset): GameState {
+export function createCareerState(managerName: string, clubId: number, dataset: Dataset, difficulty: Difficulty = "pro"): GameState {
   const team = dataset.teams.find((t) => t.id === clubId)!;
   const leagueTeams = dataset.teams.filter((t) => t.leagueId === team.leagueId);
   const squad = dataset.players.filter((p) => p.teamId === clubId).map(toPlayerState);
   squad.forEach((p) => (p.squadRole = autoSquadRole(p, squad)));
   const formationName = "4-3-3 Holding";
-  const fixtures = generateFixtures(leagueTeams.map((t) => t.id), seasonStartDate(2025));
+  const start = seasonStartDate(2025);
+  const fixtures = [...generateFixtures(leagueTeams.map((t) => t.id), start), ...drawCupRound1(dataset, team.leagueId, start.getTime())];
+  const target = objectiveFor(team.reputation, leagueTeams.length);
 
   return {
     version: SAVE_VERSION,
@@ -94,7 +119,7 @@ export function createCareerState(managerName: string, clubId: number, dataset: 
     clubId,
     leagueId: team.leagueId,
     season: 2025,
-    currentDate: isoDate(seasonStartDate(2025)),
+    currentDate: isoDate(start),
     transferBudget: team.transferBudget,
     wageBudget: team.wageBudget,
     players: squad,
@@ -105,21 +130,47 @@ export function createCareerState(managerName: string, clubId: number, dataset: 
     news: [
       {
         id: uid(),
-        date: isoDate(seasonStartDate(2025)),
+        date: isoDate(start),
         type: "season",
         title: `${managerName} appointed at ${team.name}`,
-        body: `The board welcomes the new manager. Season objective: finish top ${objectiveFor(team.reputation, leagueTeams.length)} of the ${dataset.leagues.find((l) => l.id === team.leagueId)?.name}. Transfer budget: $${(team.transferBudget / 1e6).toFixed(1)}M.`,
+        body: `The board welcomes the new manager. Season objective: finish top ${target} of the ${dataset.leagues.find((l) => l.id === team.leagueId)?.name}. Transfer budget: $${(team.transferBudget / 1e6).toFixed(1)}M. Difficulty: ${DIFFICULTY_META[difficulty].label}.`,
       },
     ],
-    seasonObjective: { targetPosition: objectiveFor(team.reputation, leagueTeams.length) },
+    seasonObjective: { targetPosition: target, cupTarget: cupTargetFor(team.reputation) },
     history: [],
     lastRoundResults: [],
+    difficulty,
+    boardConfidence: 60,
+    managerRep: 40,
+    inbox: [],
+    social: [
+      {
+        id: uid(),
+        date: isoDate(start),
+        handle: "Club Announcer",
+        tag: "@official",
+        text: `Welcome to ${team.shortName}, ${managerName.trim() || "The Gaffer"}! Let's make this a season to remember.`,
+        tone: "news",
+        likes: 820,
+      },
+    ],
+    aiTransfers: [],
+    scoutedIds: [],
+    scoutingQueue: [],
+    facilityLevel: 1,
+    achievements: [],
+    soundEnabled: true,
+    sacked: false,
+    winStreak: 0,
+    unbeatenRun: 0,
+    cleanSheetRun: 0,
+    seasonShots: 0,
   };
 }
 
 /* ---------------- helpers for match day ---------------- */
 
-/** Migrate a legacy save (v1-v3) to the current v4 shape, in place. */
+/** Migrate a legacy save (v1-v4.0) to the current v4.1+ shape, in place. */
 export function migrateGameState(raw: GameState): GameState {
   const game = raw as GameState;
   game.tactics = migrateTactics(game.tactics, game.tactics?.formationName ?? "4-3-3 Holding");
@@ -127,6 +178,28 @@ export function migrateGameState(raw: GameState): GameState {
   for (const p of game.players) {
     if (!p.trainingPlan) p.trainingPlan = { focus: "balanced", intensity: "normal" };
     if (p.retrain === undefined) p.retrain = null;
+    if (p.devPath === undefined) p.devPath = null;
+    if (p.mentor === undefined) p.mentor = null;
+  }
+  if (game.difficulty === undefined) game.difficulty = "pro";
+  if (game.boardConfidence === undefined) game.boardConfidence = 60;
+  if (game.managerRep === undefined) game.managerRep = 40;
+  if (game.inbox === undefined) game.inbox = [];
+  if (game.social === undefined) game.social = [];
+  if (game.aiTransfers === undefined) game.aiTransfers = [];
+  if (game.scoutedIds === undefined) game.scoutedIds = [];
+  if (game.scoutingQueue === undefined) game.scoutingQueue = [];
+  if (game.facilityLevel === undefined) game.facilityLevel = 1;
+  if (game.achievements === undefined) game.achievements = [];
+  if (game.soundEnabled === undefined) game.soundEnabled = true;
+  if (game.sacked === undefined) game.sacked = false;
+  if (game.winStreak === undefined) game.winStreak = 0;
+  if (game.unbeatenRun === undefined) game.unbeatenRun = 0;
+  if (game.cleanSheetRun === undefined) game.cleanSheetRun = 0;
+  if (game.seasonShots === undefined) game.seasonShots = 0;
+  if (game.seasonObjective && game.seasonObjective.cupTarget === undefined) {
+    const rep = game.fixtures.length ? 60 : 60;
+    game.seasonObjective = { targetPosition: game.seasonObjective.targetPosition, cupTarget: cupTargetFor(rep) };
   }
   game.version = SAVE_VERSION;
   return game;
@@ -142,7 +215,7 @@ export function getUserNextFixture(game: GameState) {
   return (
     [...game.fixtures]
       .filter((f) => !f.played && (f.homeId === game.clubId || f.awayId === game.clubId))
-      .sort((a, b) => a.round - b.round)[0] ?? null
+      .sort((a, b) => fixtureWeek(a) - fixtureWeek(b))[0] ?? null
   );
 }
 
@@ -163,26 +236,35 @@ export interface AdvanceOutcome {
     targetPosition: number;
     achieved: boolean;
     trophies: string[];
+    sacked: boolean;
+    offers: number[];
+    cupOutcome: "win" | "final" | "none";
   };
-}
-
-function pushNews(game: GameState, type: NewsItem["type"], title: string, body: string): void {
-  game.news.unshift({ id: uid(), date: game.currentDate, type, title, body });
-  if (game.news.length > 60) game.news.length = 60;
+  newAchievements?: string[];
 }
 
 function endSeason(game: GameState, dataset: Dataset): { summary: NonNullable<AdvanceOutcome["seasonSummary"]> } {
   const leagueTeams = dataset.teams.filter((t) => t.leagueId === game.leagueId);
   const league = dataset.leagues.find((l) => l.id === game.leagueId);
-  const table = computeTable(leagueTeams, game.fixtures);
+  const leagueFixtures = game.fixtures.filter((f) => (f.competition ?? "league") === "league");
+  const table = computeTable(leagueTeams, leagueFixtures);
   const position = Math.max(1, table.findIndex((r) => r.teamId === game.clubId) + 1);
   const row = table[position - 1];
   const team = dataset.teams.find((t) => t.id === game.clubId)!;
+  const diff = DIFFICULTY_META[game.difficulty];
   const trophies: string[] = [];
-  if (position === 1 && league) trophies.push(`${league.name} Title ${game.season}`);
+  if (position === 1 && league) {
+    trophies.push(`${league.name} Title ${game.season}`);
+    unlockAchievement(game, "league-title");
+  }
+  const cupOutcome = userCupOutcome(game, dataset);
+  if (cupOutcome === "win") {
+    trophies.push(`Domestic Cup ${game.season}`);
+    unlockAchievement(game, "cup-win");
+  }
 
   const achieved = position <= game.seasonObjective.targetPosition;
-  const prize = (leagueTeams.length - position + 1) * 1200000 + (team.reputation ?? 50) * 9000;
+  const prize = Math.round(((leagueTeams.length - position + 1) * 1200000 + (team.reputation ?? 50) * 9000) * diff.prizeMult);
   game.transferBudget += prize;
 
   game.history.push({
@@ -206,7 +288,7 @@ function endSeason(game: GameState, dataset: Dataset): { summary: NonNullable<Ad
       : `Target was top ${game.seasonObjective.targetPosition}; you finished ${position}. Expect higher expectations next season.`);
 
   /* --- dynamic potential recalculation --- */
-  const leagueMatches = game.fixtures.length / 2;
+  const leagueMatches = leagueFixtures.length / 2;
   for (const p of game.players) {
     const perf = {
       apps: p.seasonStats.apps,
@@ -223,6 +305,9 @@ function endSeason(game: GameState, dataset: Dataset): { summary: NonNullable<Ad
       pushNews(game, "season", `${p.name} potential ${rec.delta > 0 ? "rising" : "falling"}`,
         `Scouts report ${rec.reason}. Potential now ${p.potential}.`);
     }
+    if (p.devPath && p.overallRating >= p.potential - 1) {
+      pushNews(game, "season", `${p.name} completes his ${p.devPath.replace("-", " ")} evolution`, "The archetype path is maxed out — a fully realised player.");
+    }
   }
 
   /* --- aging, decay, retirement --- */
@@ -232,6 +317,7 @@ function endSeason(game: GameState, dataset: Dataset): { summary: NonNullable<Ad
     applySeasonDecay(p, rng);
     p.marketValue = computeMarketValue(p.overallRating, p.age, p.potential);
     p.contractYears = Math.max(0, p.contractYears - 1);
+    p.mentor = null; // squads reshuffle over the summer
     if (shouldRetire(p, rng)) retiredUser.push(p);
   }
   for (const r of retiredUser) {
@@ -294,6 +380,17 @@ function endSeason(game: GameState, dataset: Dataset): { summary: NonNullable<Ad
   }
   dataset.players = [...keptPlayers, ...regens];
 
+  /* --- v4.3 youth academy intake (facility-scaled) --- */
+  const intake = academyIntake(game, dataset, nextId, rng);
+  for (const y of intake) {
+    pushNews(game, "season", `Academy intake: ${y.name} signs first pro deal`, `The ${y.age}-year-old ${y.position} (OVR ${y.ovr}, POT ${y.pot}) graduates from the youth academy. Facility level ${game.facilityLevel}.`);
+    pushSocial(game, { handle: "Academy Watch", tag: "@academywatch", tone: "news", text: `${y.name} is the standout of this year's intake — POT ${y.pot} at ${y.age} years old. One to watch.` });
+    if (y.pot >= 88) unlockAchievement(game, "wonderkid-signing");
+  }
+
+  /* --- v4.2 board verdict (may sack the manager) --- */
+  const review = seasonBoardReview(game, dataset, achieved, cupOutcome, trophies);
+
   /* --- reset for new season --- */
   const newSeason = game.season + 1;
   const start = seasonStartDate(newSeason);
@@ -306,13 +403,16 @@ function endSeason(game: GameState, dataset: Dataset): { summary: NonNullable<Ad
     p.salary = Math.max(p.salary, computeSalary(p.overallRating));
   }
   game.season = newSeason;
-  game.fixtures = generateFixtures(leagueTeams.map((t) => t.id), start);
+  game.fixtures = [...generateFixtures(leagueTeams.map((t) => t.id), start), ...drawCupRound1(dataset, game.leagueId, start.getTime())];
   game.currentDate = isoDate(start);
-  game.seasonObjective = { targetPosition: objectiveFor(team.reputation ?? 50, leagueTeams.length) };
+  game.seasonObjective = { targetPosition: objectiveFor(team.reputation ?? 50, leagueTeams.length), cupTarget: cupTargetFor(team.reputation ?? 50) };
   game.lastRoundResults = [];
-  pushNews(game, "season", `Season ${newSeason} kicks off`, `Fresh fixture list released. New objective: finish top ${game.seasonObjective.targetPosition}.`);
+  game.winStreak = 0;
+  game.unbeatenRun = 0;
+  game.cleanSheetRun = 0;
+  pushNews(game, "season", `Season ${newSeason} kicks off`, `Fresh fixture list released. Objectives: top ${game.seasonObjective.targetPosition} in the league${game.seasonObjective.cupTarget === "win" ? ", win the cup" : game.seasonObjective.cupTarget === "final" ? ", reach the cup final" : ""}.`);
 
-  return { summary: { position, points: row.points, targetPosition: game.seasonObjective.targetPosition, achieved, trophies } };
+  return { summary: { position, points: row.points, targetPosition: game.seasonObjective.targetPosition, achieved, trophies, sacked: review.sacked, offers: review.offers, cupOutcome } };
 }
 
 export function advanceAfterUserMatch(
@@ -323,9 +423,12 @@ export function advanceAfterUserMatch(
   const game: GameState = structuredClone(gameIn);
   const dataset: Dataset = structuredClone(datasetIn);
   const squadIds = new Set(game.players.map((p) => p.id));
+  const diff = DIFFICULTY_META[game.difficulty] ?? DIFFICULTY_META.pro;
+  const achievementsBefore = new Set(game.achievements.map((a) => a.id));
 
-  /* 1. apply user fixture */
+  /* 1. apply user fixture (league or cup) */
   const fx = game.fixtures.find((f) => f.id === userResult.fixtureId);
+  const isCup = fx?.competition === "cup";
   if (fx) {
     fx.played = true;
     fx.homeGoals = userResult.homeGoals;
@@ -336,23 +439,94 @@ export function advanceAfterUserMatch(
   const oppGoals = userHome ? userResult.awayGoals : userResult.homeGoals;
   const won = userGoals > oppGoals;
   const drew = userGoals === oppGoals;
+  const oppId = userHome ? userResult.awayId : userResult.homeId;
+  const derby = isDerbyFixture(game, fx?.homeId ?? 0, fx?.awayId ?? 0);
 
-  /* 2. simulate remaining AI fixtures this round */
+  /* 1b. cup ties may need a shootout winner when drawn */
+  if (isCup && fx && drew) {
+    // winner resolved in progressCup via cupWinner(); note the drama
+    const opponent = userHome ? fx.awayId : fx.homeId;
+    pushNews(game, "cup", `Shootout drama vs ${teamName(dataset, opponent)}`, `Level after extra-time chaos — the tie is settled from the spot.`);
+  }
+
+  /* 1c. board reaction + streaks + achievements */
+  applyBoardResult(game, won, drew, isCup, derby);
+  if (won) {
+    game.winStreak += 1;
+    unlockAchievement(game, "first-win");
+    if (game.winStreak >= 5) unlockAchievement(game, "streak-5");
+    if (derby) unlockAchievement(game, "derby-win");
+  } else {
+    game.winStreak = 0;
+  }
+  if (won || drew) game.unbeatenRun += 1;
+  else game.unbeatenRun = 0;
+  if (game.unbeatenRun >= 10) unlockAchievement(game, "unbeaten-10");
+  if (oppGoals === 0) {
+    game.cleanSheetRun += 1;
+    if (game.cleanSheetRun >= 3) unlockAchievement(game, "clean-sheet-3");
+  } else {
+    game.cleanSheetRun = 0;
+  }
+  // hat-trick detection
+  const goalCounts = new Map<number, number>();
+  for (const r of userResult.ratings) goalCounts.set(r.playerId, r.goals);
+  for (const [, g] of goalCounts) if (g >= 3) unlockAchievement(game, "hattrick");
+  // comeback: trailed at half-time then won
+  if (won) {
+    const ht = userResult.events.find((e) => e.type === "ht");
+    if (ht) {
+      const m = ht.text.match(/(\d+)\s*-\s*(\d+)/);
+      if (m) {
+        const hg = Number(m[1]);
+        const ag = Number(m[2]);
+        const myHt = userHome ? hg : ag;
+        const oppHt = userHome ? ag : hg;
+        if (myHt < oppHt) unlockAchievement(game, "comeback");
+      }
+    }
+  }
+
+  /* 2. simulate remaining AI fixtures of this round (+ overdue cup rounds) */
   const round = fx?.round ?? 1;
+  const currentWeek = fixtureWeek(fx ?? game.fixtures[0]);
   const roundFixtures = game.fixtures.filter((f) => f.round === round);
   game.lastRoundResults = [];
-  for (const f of roundFixtures) {
-    if (f.played) {
-      game.lastRoundResults.push({ homeId: f.homeId, awayId: f.awayId, homeGoals: f.homeGoals ?? 0, awayGoals: f.awayGoals ?? 0 });
-      continue;
-    }
-    const hs = estimateClubStrength(dataset, f.homeId);
-    const as = estimateClubStrength(dataset, f.awayId);
+  const simFixture = (f: (typeof roundFixtures)[number]) => {
+    const homeIsUser = f.homeId === game.clubId;
+    const hs = estimateClubStrength(dataset, f.homeId) + (homeIsUser ? 0 : diff.aiBoost);
+    const as = estimateClubStrength(dataset, f.awayId) + (f.awayId === game.clubId ? 0 : diff.aiBoost);
     const score = quickSimulateScore(hs, as, f.id * 7919 + game.season);
     f.played = true;
     f.homeGoals = score.homeGoals;
     f.awayGoals = score.awayGoals;
     game.lastRoundResults.push({ homeId: f.homeId, awayId: f.awayId, homeGoals: score.homeGoals, awayGoals: score.awayGoals });
+  };
+  for (const f of roundFixtures) {
+    if (f.played) {
+      game.lastRoundResults.push({ homeId: f.homeId, awayId: f.awayId, homeGoals: f.homeGoals ?? 0, awayGoals: f.awayGoals ?? 0 });
+      continue;
+    }
+    simFixture(f);
+  }
+  // overdue rounds (e.g. cup rounds the user was eliminated from) — simulate so the world catches up
+  for (const f of [...game.fixtures].filter((x) => !x.played && fixtureWeek(x) < currentWeek)) {
+    f.played = true;
+    const hs = estimateClubStrength(dataset, f.homeId) + (f.homeId === game.clubId ? 0 : diff.aiBoost);
+    const as = estimateClubStrength(dataset, f.awayId) + (f.awayId === game.clubId ? 0 : diff.aiBoost);
+    const score = quickSimulateScore(hs, as, f.id * 7919 + game.season);
+    f.homeGoals = score.homeGoals;
+    f.awayGoals = score.awayGoals;
+  }
+  // cup bracket progression
+  progressCup(game, dataset);
+  if (isCup) {
+    // report cup progression for the user
+    const myRound = fx?.round ?? 100;
+    const stillAlive = game.fixtures.some((x) => x.competition === "cup" && !x.played && (x.homeId === game.clubId || x.awayId === game.clubId));
+    if (myRound === 100 && stillAlive) applyCupProgression(game, true, false);
+    if (myRound === 101 && stillAlive) applyCupProgression(game, true, false);
+    if (!stillAlive && (myRound === 100 || myRound === 101)) applyCupProgression(game, false, true);
   }
 
   /* 3. user squad: stats, form, morale, sharpness, stamina, injuries */
@@ -395,13 +569,15 @@ export function advanceAfterUserMatch(
     pushNews(game, "injury", `${p.name} injured`, `Scans confirm ${p.injuryWeeks} week${p.injuryWeeks > 1 ? "s" : ""} on the sidelines.`);
   }
 
-  /* 5. weekly development tick — training plans, coach level, retraining */
+  /* 5. weekly development tick — training plans, coach level, retraining, mentorship */
   const coachQ = coachMultiplier(game.staff?.coachLevel);
   const staffWage = COACH_LEVELS[game.staff?.coachLevel ?? "Accomplished"].wage;
   game.transferBudget -= staffWage; // weekly staff salary
   for (const p of game.players) {
     const mins = minutesPlayed.get(p.id) ?? 0;
-    const train = weeklyDevelopment(p, mins, coachQ, rng);
+    const mentor = p.mentor ? game.players.find((m) => m.id === p.mentor!.mentorId) ?? null : null;
+    if (p.mentor && !mentor) p.mentor = null; // mentor left the club
+    const train = weeklyDevelopment(p, mins, coachQ, rng, mentor);
     p.stamina = Math.min(100, (p.stamina ?? 100) + 14 + train.staminaDelta);
     if (train.injury && p.injuryWeeks === 0) {
       p.injuryWeeks = 1;
@@ -410,15 +586,29 @@ export function advanceAfterUserMatch(
     if (p.retrain) {
       const done = tickRetrain(p);
       if (done) {
-        pushNews(game, "season", `${p.name} completes position conversion`, `After ${p.retrain ? "weeks of hard work" : "retraining"}, he is now a natural ${p.position}.`);
+        pushNews(game, "season", `${p.name} completes position conversion`, `After weeks of hard work, he is now a natural ${p.position}.`);
         p.squadRole = autoSquadRole(p, game.players);
+      }
+    }
+    if (p.mentor) {
+      const finished = tickMentorship(p, mentor, rng);
+      if (finished) {
+        pushNews(game, "season", `Mentorship complete: ${p.name} has learned from the best`, "The young player has absorbed a season's wisdom in twelve weeks.");
       }
     }
     if (p.injuryWeeks > 0) {
       p.injuryWeeks -= 1;
       if (p.injuryWeeks === 0) pushNews(game, "injury", `${p.name} back in training`, "The medical team has cleared him for selection.");
     }
+    if (p.overallRating >= 78 && p.age <= 21) unlockAchievement(game, "academy-star");
     p.squadRole = autoSquadRole(p, game.players);
+  }
+
+  /* 5b. scouting queue resolves */
+  const revealed = tickScouting(game);
+  for (const pid of revealed) {
+    const rp = dataset.players.find((x) => x.id === pid);
+    if (rp) pushNews(game, "transfer", `Scout report: ${rp.name}`, `Full dossier compiled — ${rp.age}-year-old ${rp.position}, OVR ${rp.overallRating}, POT ${rp.potential}. Now on the transfer list.`);
   }
 
   /* 6. matchday income */
@@ -427,27 +617,32 @@ export function advanceAfterUserMatch(
     game.transferBudget += (userTeam.reputation ?? 50) * 2600;
   }
 
-  /* 7. date + match news */
+  /* 7. date + match news + social + living transfer market */
   const nextDate = new Date(new Date(game.currentDate + "T12:00:00Z").getTime() + 7 * 24 * 3600 * 1000);
   game.currentDate = isoDate(nextDate);
-  const oppId = userHome ? userResult.awayId : userResult.homeId;
   const oppName = teamName(dataset, oppId);
   pushNews(
     game,
     "match",
     `${won ? "Victory" : drew ? "Draw" : "Defeat"} ${userGoals}-${oppGoals} vs ${oppName}`,
-    `Round ${round}: ${userHome ? "home" : "away"} fixture. xG ${userResult.stats.xg[0]}-${userResult.stats.xg[1]}. Possession ${userResult.stats.possession[0]}%-${userResult.stats.possession[1]}%.`,
+    `${isCup ? (fx?.tieLabel ?? "Cup tie") : `Round ${round}`}: ${userHome ? "home" : "away"}. xG ${userResult.stats.xg[0]}-${userResult.stats.xg[1]}. Possession ${userResult.stats.possession[0]}%-${userResult.stats.possession[1]}%.`,
   );
+  socialAfterMatch(game, won, drew, derby, userGoals, oppGoals, dataset.teams.find((t) => t.id === oppId)?.shortName ?? "them");
+  runTransferWorld(game, dataset, rng);
 
-  /* 8. season end? */
-  const allPlayed = game.fixtures.every((f) => f.played);
+  /* 8. season end? (league complete AND cup complete) */
+  const leagueDone = game.fixtures.filter((f) => (f.competition ?? "league") === "league").every((f) => f.played);
+  const cupDone = game.fixtures.filter((f) => f.competition === "cup").every((f) => f.played);
+  const userHasRemaining = game.fixtures.some((f) => !f.played && (f.homeId === game.clubId || f.awayId === game.clubId));
+  const allPlayed = leagueDone && cupDone && !userHasRemaining;
   let seasonSummary: AdvanceOutcome["seasonSummary"];
   if (allPlayed) {
     const res = endSeason(game, dataset);
     seasonSummary = res.summary;
   }
+  const newAchievements = game.achievements.map((a) => a.id).filter((id) => !achievementsBefore.has(id));
 
-  return { game, dataset, seasonEnded: allPlayed, seasonSummary };
+  return { game, dataset, seasonEnded: allPlayed, seasonSummary, newAchievements };
 }
 
 /* ---------------- transfers ---------------- */
@@ -485,6 +680,9 @@ export function buyPlayer(gameIn: GameState, datasetIn: Dataset, playerId: numbe
   game.lineup = game.lineup; // unchanged; manager adjusts in tactics
   const from = teamName(dataset, teamId);
   pushNews(game, "transfer", `Signed ${p.name} for $${(price / 1e6).toFixed(2)}M`, `The ${p.age}-year-old ${p.position} (OVR ${p.overallRating}, POT ${p.potential}) joins from ${from} on a 3-year deal.`);
+  pushSocial(game, { handle: "Fabrizio Romano", tag: "@FabrizioRomano", tone: "news", text: `${p.name} to ${dataset.teams.find((t) => t.id === game.clubId)?.shortName ?? "the club"}, here we go! Confirmed and signed this morning. Medical done.` });
+  if (p.potential >= 88) unlockAchievement(game, "wonderkid-signing");
+  if (price >= 30_000_000) unlockAchievement(game, "big-signing");
   return { game, dataset, ok: true, message: `${p.name} has joined the club` };
 }
 

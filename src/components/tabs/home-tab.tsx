@@ -7,20 +7,24 @@ import { LeagueTable } from "@/components/league-table";
 import { Badge } from "@/components/ui/badge";
 import { formatDate, formatMoney, ordinal } from "@/lib/format";
 import { computeTable } from "@/lib/game/season";
+import { resolveInboxMessage } from "@/lib/game/career";
 import { cn } from "@/lib/utils";
-import { CalendarDays, ChevronRight, ClipboardList, CreditCard, Globe, History, Megaphone, ShieldAlert } from "lucide-react";
+import { CalendarDays, ChevronRight, ClipboardList, CreditCard, Globe, Heart, History, Inbox, Megaphone, MessageSquare, Scale, ShieldAlert, Trophy } from "lucide-react";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import type { NewsItem } from "@/lib/game/types";
 
-const NEWS_ICON: Record<NewsItem["type"], typeof Megaphone> = {
+const NEWS_ICON: Record<string, typeof Megaphone> = {
   match: Megaphone,
   transfer: CreditCard,
   injury: ShieldAlert,
   finance: CreditCard,
   season: ClipboardList,
   award: History,
+  cup: Trophy,
+  social: MessageSquare,
+  board: Scale,
 };
 
 function NewsRow({ item, onOpen }: { item: NewsItem; onOpen: (n: NewsItem) => void }) {
@@ -67,6 +71,15 @@ export function HomeTab() {
   const userTeam = dataset.teams.find((t) => t.id === game.clubId);
   const wages = game.players.reduce((s, p) => s + p.salary, 0);
   const wagePct = Math.min(100, Math.round((wages / Math.max(game.wageBudget, 1)) * 100));
+  const pendingInbox = game.inbox.filter((m) => !m.resolvedOptionId);
+  const confidence = game.boardConfidence ?? 60;
+  const confTone = confidence >= 55 ? "bg-emerald-500" : confidence >= 30 ? "bg-amber-500" : "bg-rose-500";
+
+  const answer = (msgId: string, optionId: string) => {
+    useAppStore.getState().update((g) => {
+      resolveInboxMessage(g, structuredClone(dataset), msgId, optionId);
+    });
+  };
 
   return (
     <div className="space-y-4">
@@ -87,6 +100,61 @@ export function HomeTab() {
           <p className="text-lg font-black text-slate-200">{formatMoney(game.transferBudget)}</p>
         </div>
       </section>
+
+      {/* v4.2 board confidence */}
+      <section aria-label="Board confidence" className="rounded-xl border border-slate-800 bg-slate-950/40 p-3">
+        <div className="flex items-center justify-between text-xs">
+          <span className="flex items-center gap-1.5 font-semibold text-slate-300">
+            <Scale className="h-3.5 w-3.5 text-amber-400" aria-hidden /> Board confidence
+          </span>
+          <Badge variant="outline" className="text-[10px] border-slate-700 text-slate-400">
+            Cup: {game.seasonObjective.cupTarget === "win" ? "win it" : game.seasonObjective.cupTarget === "final" ? "reach final" : "no target"}
+          </Badge>
+        </div>
+        <div className="mt-2 h-2 rounded-full bg-slate-800 overflow-hidden">
+          <div className={cn("h-full rounded-full transition-all duration-500", confTone)} style={{ width: `${confidence}%` }} />
+        </div>
+        <div className="mt-1.5 flex justify-between text-[10px] text-slate-500">
+          <span>{confidence >= 70 ? "The board loves you" : confidence >= 45 ? "Steady — keep winning" : confidence >= 25 ? "Under pressure" : "Sack talk in the press..."}</span>
+          <span>Manager rep {game.managerRep ?? 40}</span>
+        </div>
+      </section>
+
+      {/* v4.1 inbox — player conversations */}
+      {pendingInbox.length > 0 && (
+        <section aria-label="Inbox messages" className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-3">
+          <p className="text-[11px] font-semibold uppercase tracking-wider text-amber-400 mb-2 flex items-center gap-1.5">
+            <Inbox className="h-3.5 w-3.5" aria-hidden /> Inbox ({pendingInbox.length})
+          </p>
+          <div className="space-y-2">
+            {pendingInbox.slice(0, 3).map((m) => (
+              <div key={m.id} className="rounded-lg border border-slate-800 bg-slate-950/60 p-2.5">
+                <p className="text-xs font-bold text-slate-100">{m.title}</p>
+                <p className="text-[11px] text-slate-400 mt-0.5 leading-snug">{m.body}</p>
+                <div className="mt-2 grid grid-cols-2 gap-1.5">
+                  {m.options.map((o) => (
+                    <Button
+                      key={o.id}
+                      size="sm"
+                      variant="outline"
+                      className={cn(
+                        "h-8 text-[11px]",
+                        o.id === "accept" || o.id === "promise" || o.id === "extend"
+                          ? "border-emerald-600/50 text-emerald-400"
+                          : "border-slate-700 text-slate-300",
+                      )}
+                      onClick={() => answer(m.id, o.id)}
+                      aria-label={`${o.label} — ${m.title}`}
+                    >
+                      {o.label}
+                    </Button>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       {/* wage / FFP */}
       <section aria-label="Finance overview" className="rounded-xl border border-slate-800 bg-slate-950/40 p-3">
@@ -127,6 +195,32 @@ export function HomeTab() {
         </div>
         <LeagueTable dataset={dataset} leagueId={game.leagueId} fixtures={game.fixtures} clubId={game.clubId} limit={6} />
       </section>
+
+      {/* v4.1 Quattrick Social */}
+      {game.social.length > 0 && (
+        <section aria-label="Quattrick Social feed">
+          <h2 className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-2 flex items-center gap-1.5">
+            <MessageSquare className="h-3.5 w-3.5" aria-hidden /> Club Buzz
+          </h2>
+          <div className="space-y-2">
+            {game.social.slice(0, 4).map((p) => (
+              <div key={p.id} className="rounded-xl border border-slate-800 bg-slate-950/40 p-2.5">
+                <div className="flex items-center gap-2">
+                  <div className={cn(
+                    "h-6 w-6 shrink-0 rounded-full flex items-center justify-center text-[9px] font-black",
+                    p.tone === "hype" ? "bg-emerald-500/20 text-emerald-300" : p.tone === "mock" ? "bg-rose-500/20 text-rose-300" : "bg-slate-700 text-slate-300",
+                  )} aria-hidden>{p.handle.slice(0, 2).toUpperCase()}</div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[11px] font-bold text-slate-200 truncate">{p.handle} <span className="text-slate-500 font-normal">{p.tag}</span></p>
+                  </div>
+                  <span className="flex items-center gap-0.5 text-[10px] text-slate-500 shrink-0"><Heart className="h-3 w-3" aria-hidden />{p.likes > 999 ? `${(p.likes / 1000).toFixed(1)}K` : p.likes}</span>
+                </div>
+                <p className="text-xs text-slate-300 mt-1.5 leading-snug">{p.text}</p>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       {/* news feed */}
       <section aria-label="Club news feed">

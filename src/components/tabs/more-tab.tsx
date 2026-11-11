@@ -8,9 +8,11 @@ import { Separator } from "@/components/ui/separator";
 import { DatabaseManagerModal } from "@/components/database-manager-modal";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
-import { formatDate } from "@/lib/format";
+import { formatDate, formatMoney } from "@/lib/format";
 import { generateDefaultDataset } from "@/lib/game/defaultData";
-import { Cloud, CloudOff, Database, Download, FileSpreadsheet, HardDrive, LogOut, RefreshCw, Save, Trash2, Upload } from "lucide-react";
+import { ACHIEVEMENTS } from "@/lib/game/career";
+import { cn } from "@/lib/utils";
+import { Cloud, CloudOff, Database, Download, FileSpreadsheet, HardDrive, LogOut, RefreshCw, Save, Trash2, Trophy, Upload } from "lucide-react";
 
 export function MoreTab() {
   const dataset = useAppStore((s) => s.dataset);
@@ -67,12 +69,80 @@ export function MoreTab() {
   };
 
   if (!game || !dataset) return null;
+  const unlocked = game.achievements ?? [];
 
   return (
     <div className="space-y-3">
       {busyMsg && (
         <p role="status" className="rounded-lg border border-emerald-500/40 bg-emerald-500/10 p-2.5 text-xs text-emerald-300">{busyMsg}</p>
       )}
+
+      {/* v4.4 career extras: trophy room + facility + sound */}
+      <section aria-label="Trophy room and career settings" className="rounded-xl border border-slate-800 bg-slate-950/40 p-3 space-y-3">
+        <div>
+          <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 mb-2 flex items-center gap-1.5">
+            <Trophy className="h-3.5 w-3.5 text-amber-400" aria-hidden /> Trophy room ({unlocked.length}/{ACHIEVEMENTS.length})
+          </p>
+          <div className="grid grid-cols-2 gap-1.5">
+            {ACHIEVEMENTS.map((a) => {
+              const got = unlocked.some((u) => u.id === a.id);
+              return (
+                <div
+                  key={a.id}
+                  title={a.desc}
+                  className={cn(
+                    "rounded-lg border p-2",
+                    got ? "border-amber-500/40 bg-amber-500/10" : "border-slate-800 bg-slate-950/40 opacity-60",
+                  )}
+                >
+                  <p className={cn("text-[10px] font-bold truncate", got ? "text-amber-300" : "text-slate-500")}>
+                    {got ? <Trophy className="h-3 w-3 inline mr-1" aria-hidden /> : null}
+                    {a.name}
+                  </p>
+                  <p className="text-[9px] text-slate-600 leading-tight">{a.desc}</p>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="flex-1">
+            <p className="text-[11px] font-semibold text-slate-300">Youth academy · level {game.facilityLevel}/5</p>
+            <p className="text-[10px] text-slate-500">Better facilities produce stronger academy regens each season.</p>
+          </div>
+          <Button
+            size="sm"
+            className="h-9 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold"
+            disabled={game.facilityLevel >= 5 || game.transferBudget < game.facilityLevel * 3_000_000}
+            onClick={() => {
+              useAppStore.getState().update((g) => {
+                if (g.facilityLevel < 5 && g.transferBudget >= g.facilityLevel * 3_000_000) {
+                  g.transferBudget -= g.facilityLevel * 3_000_000;
+                  g.facilityLevel += 1;
+                }
+              });
+            }}
+            aria-label={`Upgrade youth academy for ${formatMoney(game.facilityLevel * 3_000_000)}`}
+          >
+            {game.facilityLevel >= 5 ? "Max" : `Upgrade ${formatMoney(game.facilityLevel * 3_000_000)}`}
+          </Button>
+        </div>
+        <button
+          type="button"
+          role="switch"
+          aria-checked={game.soundEnabled}
+          onClick={() => useAppStore.getState().update((g) => { g.soundEnabled = !g.soundEnabled; })}
+          className={cn(
+            "w-full flex items-center justify-between rounded-lg border p-2.5 transition-colors",
+            game.soundEnabled ? "border-emerald-500/40 bg-emerald-500/5" : "border-slate-800 bg-slate-950/40",
+          )}
+        >
+          <span className="text-xs font-semibold text-slate-200">Crowd sound & vibration on goals</span>
+          <span className={cn("text-[10px] font-bold px-2 py-0.5 rounded-full", game.soundEnabled ? "bg-emerald-500/20 text-emerald-400" : "bg-slate-800 text-slate-500")}>
+            {game.soundEnabled ? "ON" : "OFF"}
+          </span>
+        </button>
+      </section>
 
       {/* cloud status */}
       <section aria-label="Cloud status" className="rounded-xl border border-slate-800 bg-slate-950/40 p-3">

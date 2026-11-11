@@ -7,6 +7,8 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Cloud, CloudOff, HardDriveDownload, Play, Trash2, Trophy, UserRound } from "lucide-react";
 import { formatDate } from "@/lib/format";
+import { DIFFICULTY_META, type Difficulty } from "@/lib/game/types";
+import { cn } from "@/lib/utils";
 
 const CREST_COLORS = [
   "bg-emerald-600", "bg-amber-600", "bg-rose-600", "bg-teal-600", "bg-orange-600",
@@ -27,6 +29,7 @@ export function OnboardingScreen() {
 
   const [managerName, setManagerName] = useState("");
   const [selectedClub, setSelectedClub] = useState<number | null>(null);
+  const [difficulty, setDifficulty] = useState<Difficulty>("pro");
   const [starting, setStarting] = useState(false);
 
   const teams = useMemo(() => {
@@ -40,7 +43,7 @@ export function OnboardingScreen() {
   const handleStart = async () => {
     if (!canStart) return;
     setStarting(true);
-    await startCareer(managerName.trim(), selectedClub!);
+    await startCareer(managerName.trim(), selectedClub!, difficulty);
     setStarting(false);
   };
 
@@ -128,6 +131,26 @@ export function OnboardingScreen() {
                   className="pl-9 bg-slate-950 border-slate-800"
                   aria-label="Manager name"
                 />
+              </div>
+              <p className="text-xs text-slate-500 mt-3 mb-2">Choose difficulty</p>
+              <div className="grid grid-cols-3 gap-1.5" role="group" aria-label="Difficulty selection">
+                {(Object.keys(DIFFICULTY_META) as Difficulty[]).map((d) => (
+                  <button
+                    key={d}
+                    type="button"
+                    onClick={() => setDifficulty(d)}
+                    aria-pressed={difficulty === d}
+                    className={cn(
+                      "min-h-[52px] rounded-lg border p-1.5 text-center transition-colors",
+                      difficulty === d
+                        ? "border-emerald-500/60 bg-emerald-500/10 text-emerald-400"
+                        : "border-slate-800 bg-slate-950/40 text-slate-400 hover:border-slate-700",
+                    )}
+                  >
+                    <span className="block text-[11px] font-bold">{DIFFICULTY_META[d].label}</span>
+                    <span className="block text-[9px] text-slate-500 leading-tight">{DIFFICULTY_META[d].desc}</span>
+                  </button>
+                ))}
               </div>
               <p className="text-xs text-slate-500 mt-3 mb-2">Choose your club</p>
               <div className="space-y-2">

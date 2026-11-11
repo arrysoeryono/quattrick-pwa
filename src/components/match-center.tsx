@@ -7,11 +7,13 @@ import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { LiveMatch } from "@/components/live-match";
 import { buildUserMatchTeam, aiFormationFor, getUserNextFixture } from "@/lib/game/advance";
-import { buildAiTeamConfig } from "@/lib/game/season";
+import { buildAiTeamConfig, estimateClubStrength } from "@/lib/game/season";
+import { isDerbyFixture } from "@/lib/game/career";
 import { formatDate, formatMoney, ordinal, ratingColor } from "@/lib/format";
 import { computeTable } from "@/lib/game/season";
 import { cn } from "@/lib/utils";
-import { Award, CalendarDays, Goal, Play, Swords, TrendingUp } from "lucide-react";
+import { Award, CalendarDays, Flame, Goal, Play, Swords, TrendingUp, Trophy } from "lucide-react";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 export function MatchCenter() {
   const game = useAppStore((s) => s.game);
@@ -103,6 +105,26 @@ export function MatchCenter() {
             <div><p className="font-mono text-slate-200">{liveResult.stats.shots[0]} · {liveResult.stats.shots[1]}</p>Shots</div>
             <div><p className="font-mono text-slate-200">{liveResult.stats.xg[0]} · {liveResult.stats.xg[1]}</p>xG</div>
           </div>
+          {liveResult.shotLog && liveResult.shotLog.length > 0 && (
+            <div className="mt-3">
+              <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">xG timeline</p>
+              <div className="flex items-end gap-px h-16 rounded-lg bg-slate-950 border border-slate-800 p-1.5" aria-label="Shot timeline chart">
+                {liveResult.shotLog.map((s, i) => (
+                  <div
+                    key={i}
+                    title={`${s.minute}' ${s.side} xG ${s.xg}${s.scored ? " GOAL" : ""}`}
+                    className={cn(
+                      "flex-1 rounded-sm",
+                      s.side === "home" ? "bg-emerald-500/70" : "bg-sky-500/70",
+                      s.scored && (s.side === "home" ? "bg-emerald-300" : "bg-sky-300"),
+                    )}
+                    style={{ height: `${Math.max(8, Math.min(100, s.xg * 160))}%` }}
+                  />
+                ))}
+              </div>
+              <div className="flex justify-between text-[9px] text-slate-600 mt-0.5"><span>0&apos;</span><span>45&apos;</span><span>90&apos;</span></div>
+            </div>
+          )}
           {motmPlayer && motm && (
             <div className="mt-3 flex items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-2">
               <Award className="h-4 w-4 text-amber-400" aria-hidden />
@@ -149,12 +171,34 @@ export function MatchCenter() {
   /* ---------- next fixture ---------- */
   return (
     <section aria-label="Match center" className="space-y-3">
+      {/* v4.2 sacked modal */}
+      <Dialog open={Boolean(game.sacked)}>
+        <DialogContent className="max-w-[400px]">
+          <DialogHeader>
+            <DialogTitle className="text-left">You have been sacked</DialogTitle>
+            <DialogDescription className="text-left">
+              The board has terminated your contract after a poor run of results. Rebuild your career at a new club.
+            </DialogDescription>
+          </DialogHeader>
+          <Button
+            className="w-full h-11 bg-emerald-500 text-slate-950 font-bold"
+            onClick={() => {
+              useAppStore.getState().update((g) => { g.sacked = false; });
+              void useAppStore.getState().startCareer(game.managerName, game.clubId, game.difficulty);
+            }}
+            aria-label="Start fresh career at a new club"
+          >
+            Rebuild your career (new save)
+          </Button>
+        </DialogContent>
+      </Dialog>
+
       {nextFixture ? (
         <div className="rounded-xl border border-emerald-500/30 bg-gradient-to-b from-emerald-950/40 to-slate-900 p-4">
           <div className="flex items-center justify-between">
             <Badge variant="outline" className="border-emerald-500/40 text-emerald-400 gap-1">
               <CalendarDays className="h-3 w-3" aria-hidden />
-              Matchday {nextFixture.round} · {formatDate(nextFixture.date)}
+              {nextFixture.competition === "cup" ? (nextFixture.tieLabel ?? "Cup tie") : `Matchday ${nextFixture.round}`} · {formatDate(nextFixture.date)}
             </Badge>
             <Badge variant="outline" className="border-slate-700 text-slate-400">{nextFixture.homeId === game.clubId ? "Home" : "Away"}</Badge>
           </div>
@@ -163,22 +207,54 @@ export function MatchCenter() {
             const oppId = userHome ? nextFixture.awayId : nextFixture.homeId;
             const opp = dataset.teams.find((t) => t.id === oppId);
             const oppTable = table.findIndex((r) => r.teamId === oppId) + 1;
+            const isCup = nextFixture.competition === "cup";
+            const derby = isDerbyFixture(game, nextFixture.homeId, nextFixture.awayId) && !isCup;
+            const oppSquad = dataset.players.filter((p) => p.teamId === oppId).sort((a, b) => b.overallRating - a.overallRating);
+            const keyPlayer = oppSquad[0];
+            const oppStrength = Math.round(estimateClubStrength(dataset, oppId) + ({ amateur: -3, pro: 0, legend: 3 }[game.difficulty] ?? 0));
             return (
-              <div className="mt-3 flex items-center justify-center gap-4">
-                <div className="text-center flex-1">
-                  <div className="mx-auto h-10 w-10 rounded-lg bg-emerald-600 flex items-center justify-center text-[10px] font-black text-white">{userTeam?.shortName}</div>
-                  <p className="mt-1.5 text-xs font-bold text-slate-200">{userTeam?.shortName}</p>
-                  <p className="text-[10px] text-slate-500">{ordinal(position)} in table</p>
+              <>
+                <div className="mt-3 flex items-center justify-center gap-4">
+                  <div className="text-center flex-1">
+                    <div className="mx-auto h-10 w-10 rounded-lg bg-emerald-600 flex items-center justify-center text-[10px] font-black text-white">{userTeam?.shortName}</div>
+                    <p className="mt-1.5 text-xs font-bold text-slate-200">{userTeam?.shortName}</p>
+                    <p className="text-[10px] text-slate-500">{ordinal(position)} in table</p>
+                  </div>
+                  <div className="text-center">
+                    <p className="text-[10px] uppercase tracking-widest text-slate-500 font-bold">VS</p>
+                  </div>
+                  <div className="text-center flex-1">
+                    <div className="mx-auto h-10 w-10 rounded-lg bg-slate-700 flex items-center justify-center text-[10px] font-black text-white">{opp?.shortName}</div>
+                    <p className="mt-1.5 text-xs font-bold text-slate-200">{opp?.shortName}</p>
+                    <p className="text-[10px] text-slate-500">{isCup ? nextFixture.tieLabel : `${ordinal(oppTable)} in table`}</p>
+                  </div>
                 </div>
-                <div className="text-center">
-                  <p className="text-[10px] uppercase tracking-widest text-slate-500 font-bold">VS</p>
-                </div>
-                <div className="text-center flex-1">
-                  <div className="mx-auto h-10 w-10 rounded-lg bg-slate-700 flex items-center justify-center text-[10px] font-black text-white">{opp?.shortName}</div>
-                  <p className="mt-1.5 text-xs font-bold text-slate-200">{opp?.shortName}</p>
-                  <p className="text-[10px] text-slate-500">{ordinal(oppTable)} in table</p>
-                </div>
-              </div>
+                {(isCup || derby) && (
+                  <div className="mt-2 flex justify-center gap-1.5">
+                    {isCup && (
+                      <Badge variant="outline" className="border-amber-500/50 text-amber-400 gap-1">
+                        <Trophy className="h-3 w-3" aria-hidden /> {nextFixture.tieLabel ?? "Cup tie"}
+                      </Badge>
+                    )}
+                    {derby && (
+                      <Badge variant="outline" className="border-rose-500/50 text-rose-400 gap-1">
+                        <Flame className="h-3 w-3" aria-hidden /> DERBY DAY
+                      </Badge>
+                    )}
+                  </div>
+                )}
+                {opp && (
+                  <div className="mt-3 rounded-lg border border-slate-800 bg-slate-950/60 p-2.5" aria-label="Pre-match scout report">
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">Scout report</p>
+                    <p className="text-[11px] text-slate-300">
+                      {opp.shortName} · strength <span className="font-mono font-bold text-slate-100">{oppStrength}</span> · {aiFormationFor(oppId)}
+                      {keyPlayer && (
+                        <> · key man <span className="font-bold text-amber-300">{keyPlayer.name}</span> ({keyPlayer.overallRating} OVR)</>
+                      )}
+                    </p>
+                  </div>
+                )}
+              </>
             );
           })()}
           <Button

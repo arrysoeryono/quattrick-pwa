@@ -1,7 +1,7 @@
 "use client";
 
 import { create } from "zustand";
-import type { Dataset, GameState, MatchResult, MatchTeamConfig, SaveRecord } from "@/lib/game/types";
+import type { Dataset, Difficulty, GameState, MatchResult, MatchTeamConfig, SaveRecord } from "@/lib/game/types";
 import {
   loadActiveDataset,
   listSaves,
@@ -47,7 +47,7 @@ interface AppStore {
   boot: () => Promise<void>;
   setActiveTab: (tab: TabKey) => void;
   setCloudOnline: (v: boolean) => void;
-  startCareer: (managerName: string, clubId: number) => Promise<void>;
+  startCareer: (managerName: string, clubId: number, difficulty?: Difficulty) => Promise<void>;
   continueSave: (id: string) => Promise<void>;
   removeSave: (id: string) => Promise<void>;
   update: (mutator: (game: GameState) => void) => void;
@@ -57,6 +57,7 @@ interface AppStore {
 
   /* live match actions */
   kickoff: (fixtureId: number, home: MatchConfigInput, away: MatchConfigInput) => void;
+  shout: (id: "go-all-out" | "park-the-bus" | "press-hard" | "time-waste") => void;
   pushTick: (payload: TickPayload) => void;
   finishMatch: (result: MatchResult) => Promise<void>;
   clearLiveResult: () => void;
@@ -97,6 +98,13 @@ export const useAppStore = create<AppStore>((set, get) => ({
   activeTab: "home",
   cloudOnline: null,
   userId: "pending",
+
+  /* live match */
+  runner: null,
+  liveFixtureId: null,
+  liveSnapshot: null,
+  liveResult: null,
+  lastAdvance: null,
 
   boot: async () => {
     set({ userId: getUserId() });
@@ -142,10 +150,10 @@ export const useAppStore = create<AppStore>((set, get) => ({
   setActiveTab: (tab) => set({ activeTab: tab }),
   setCloudOnline: (v) => set({ cloudOnline: v }),
 
-  startCareer: async (managerName, clubId) => {
+  startCareer: async (managerName, clubId, difficulty = "pro") => {
     const dataset = get().dataset;
     if (!dataset) return;
-    const game = createCareerState(managerName, clubId, dataset);
+    const game = createCareerState(managerName, clubId, dataset, difficulty);
     const clubName = dataset.teams.find((t) => t.id === clubId)?.name ?? "Club";
     const record = await putSave(game, clubName).catch(() => null);
     set({ game, saveId: record?.id ?? null, saves: await listSaves().catch(() => []), phase: "manage", activeTab: "home" });
@@ -219,8 +227,10 @@ export const useAppStore = create<AppStore>((set, get) => ({
       onTick: (payload) => get().pushTick(payload),
       onFulltime: (result) => void get().finishMatch(result),
     });
-    runner.start(fixtureId, home, away, 1);
+    runner.start(fixtureId, home, away, 1, get().game?.clubId);
   },
+
+  shout: (id) => get().runner?.shout(id),
 
   pushTick: (payload) => {
     set({
@@ -229,8 +239,10 @@ export const useAppStore = create<AppStore>((set, get) => ({
         half: payload.half,
         homeGoals: payload.snapshot.homeGoals,
         awayGoals: payload.snapshot.awayGoals,
-        events: payload.snapshot.events,
+        events: payload.snapshot.events as LiveMatchSnapshot["events"],
         stats: payload.snapshot.stats,
+        momentum: payload.snapshot.momentum,
+        shoutsLeft: payload.snapshot.shoutsLeft,
       },
     });
   },

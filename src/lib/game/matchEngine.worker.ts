@@ -17,6 +17,7 @@ import type {
   MatchResult,
   MatchStats,
   MatchTeamConfig,
+  PositionCode,
   TacticSliders,
 } from "./types";
 
@@ -92,11 +93,12 @@ interface TeamSim {
 }
 
 type WorkerInbound =
-  | { type: "start"; fixtureId: number; home: MatchTeamConfig; away: MatchTeamConfig; speed: number }
+  | { type: "start"; fixtureId: number; home: MatchTeamConfig; away: MatchTeamConfig; speed: number; userTeamId?: number }
   | { type: "speed"; speed: number }
   | { type: "pause" }
   | { type: "resume" }
-  | { type: "instant" };
+  | { type: "instant" }
+  | { type: "shout"; id: "go-all-out" | "park-the-bus" | "press-hard" | "time-waste" };
 
 type WorkerOutbound =
   | { type: "tick"; minute: number; half: 1 | 2 | "FT"; snapshot: LiveOut }
@@ -110,6 +112,8 @@ interface LiveOut {
   stats: MatchStats;
   homeName: string;
   awayName: string;
+  momentum: number; // -100 (away storms) .. 100 (home storms)
+  shoutsLeft: number;
 }
 
 /* ---------- state ---------- */
@@ -125,6 +129,11 @@ let paused = false;
 let instant = false;
 let running = false;
 let injuries: number[] = [];
+let momentum = 0; // -100 away .. +100 home
+let shotLog: { minute: number; side: "home" | "away"; xg: number; scored: boolean; shooter?: string }[] = [];
+let shoutsLeft = 3;
+let userTeamId = -1;
+let isDerby = false;
 
 const post = (msg: WorkerOutbound) => (self as unknown as Worker).postMessage(msg);
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -192,7 +201,7 @@ function makeTeam(cfg: MatchTeamConfig, side: "home" | "away", oppMods: TeamMods
   const formation = getFormation(cfg.formation);
   const players: SimPlayer[] = cfg.players.map((p, i) => {
     const slot = formation.positions[i] ?? p.position;
-    const affinity = positionAffinity(p.position as SimPlayer["position"], slot);
+    const affinity = positionAffinity(p.position as PositionCode, slot);
     const sharpAdj = p.sharpness >= 80 ? 5 : p.sharpness >= 60 ? 3 : p.sharpness >= 40 ? 0 : -4;
     const eff = Math.round(p.ovr * affinity + sharpAdj + (p.morale - 60) * 0.03);
     return {
@@ -315,7 +324,9 @@ function resolveShot(att: TeamSim, def: TeamSim, shooter: SimPlayer, dist: numbe
   const xg = Math.max(0.015, Math.min(0.72, 1.15 * Math.exp(-dist / 9.2) * (0.35 + 0.65 * angleFactor) * pressure * finishBonus * xgMult));
   att.xg += xg;
   const roll = rng();
-  if (roll < xg) {
+  const scored = roll < xg;
+  shotLog.push({ minute, side: att.side, xg: Math.round(xg * 100) / 100, scored, shooter: shooter.name });
+  if (scored) {
     att.goals++; shooter.goals++; shooter.rating += 1.0;
     att.onTarget++;
     const assister = pickWeighted(onPitch(att).filter((p) => p.id !== shooter.id), (p) => {
@@ -373,6 +384,12 @@ function simulateMinute(): void {
   const defPower = teamPower(def, "def");
   const chanceProb = Math.min(0.32, Math.max(0.03, 0.115 * Math.pow(attPower / defPower, 2.4)));
 
+  // momentum: possession lean with decay, derby swings harder
+  const swing = isDerby ? 9 : 6;
+  momentum = Math.max(-100, Math.min(100, momentum * 0.88 + (homeHasBall ? swing : -swing)));
+  const homeGoalsBefore = h.goals;
+  const awayGoalsBefore = a.goals;
+
   if (rng() < chanceProb) {
     // PENALTY! (foul in the box) — the designated taker steps up
     if (rng() < 0.035) {
@@ -408,6 +425,10 @@ function simulateMinute(): void {
       }
     }
   }
+
+  // momentum reacts strongly to goals
+  if (h.goals > homeGoalsBefore) momentum = Math.min(100, momentum + (isDerby ? 34 : 26));
+  if (a.goals > awayGoalsBefore) momentum = Math.max(-100, momentum - (isDerby ? 34 : 26));
 
   // cards (aggression slider raises the stakes)
   for (const t of [h, a]) {
@@ -481,6 +502,8 @@ function buildResult(): MatchResult {
     stats,
     injuries,
     motmPlayerId: motm?.playerId ?? null,
+    shotLog,
+    momentum: Math.round(momentum),
   };
 }
 
@@ -499,6 +522,8 @@ function snapshot(): LiveOut {
     },
     homeName: h.cfg.name,
     awayName: a.cfg.name,
+    momentum: Math.round(momentum),
+    shoutsLeft,
   };
 }
 
@@ -518,18 +543,59 @@ async function run(): Promise<void> {
   running = false;
 }
 
-function begin(fixture: number, hCfg: MatchTeamConfig, aCfg: MatchTeamConfig, spd: number) {
+function begin(fixture: number, hCfg: MatchTeamConfig, aCfg: MatchTeamConfig, spd: number, userTeam?: number) {
   fixtureId = fixture;
+  isDerby = Boolean(hCfg.isDerby && aCfg.isDerby);
   // build home first without an opponent, then rebuild pairs so man-mark is symmetric
   const awayMods = computeMods(aCfg);
   home = makeTeam(hCfg, "home", awayMods);
   const homeMods = home.mods;
   away = makeTeam(aCfg, "away", homeMods);
+  // v4.4 home advantage + derby intensity
+  home.mods.att *= 1.03;
+  away.mods.att *= 0.985;
+  if (isDerby) {
+    home.mods.card *= 1.25;
+    away.mods.card *= 1.25;
+    home.mods.staminaDrain += 0.02;
+    away.mods.staminaDrain += 0.02;
+  }
   minute = 0;
-  events = [{ minute: 0, type: "ko", teamSide: "neutral", text: `Kick-off at ${hCfg.name}! ${hCfg.shortName} vs ${aCfg.shortName}.` }];
+  momentum = 0;
+  shotLog = [];
+  shoutsLeft = 3;
+  userTeamId = userTeam ?? -1;
+  events = [{ minute: 0, type: "ko", teamSide: "neutral", text: `Kick-off at ${hCfg.name}! ${hCfg.shortName} vs ${aCfg.shortName}.${isDerby ? " DERBY DAY — the atmosphere is electric!" : ""}` }];
   speed = spd;
   injuries = [];
   void run();
+}
+
+/** v4.4 touchline shout — the manager barks an order and the team reacts. */
+function applyShout(id: "go-all-out" | "park-the-bus" | "press-hard" | "time-waste"): void {
+  if (shoutsLeft <= 0) return;
+  const t = userTeamId === (home?.cfg.id ?? -1) ? home : userTeamId === (away?.cfg.id ?? -1) ? away : null;
+  if (!t) return;
+  shoutsLeft -= 1;
+  if (id === "go-all-out") {
+    t.mentality = "attacking";
+    t.mods.att *= 1.06;
+    t.mods.def *= 0.96;
+    t.mods.staminaDrain += 0.015;
+    events.push({ minute, type: "info", teamSide: t.side, text: `The manager demands everything — ${t.cfg.shortName} throw men forward!` });
+  } else if (id === "park-the-bus") {
+    t.mentality = "defensive";
+    t.mods.def *= 1.07;
+    t.mods.att *= 0.94;
+    events.push({ minute, type: "info", teamSide: t.side, text: `${t.cfg.shortName} drop into a low block — park the bus!` });
+  } else if (id === "press-hard") {
+    t.mods.press += 12;
+    t.mods.staminaDrain += 0.02;
+    events.push({ minute, type: "info", teamSide: t.side, text: `Press! Press! ${t.cfg.shortName} hunt the ball all over the pitch.` });
+  } else {
+    t.mods.mid *= 1.03;
+    events.push({ minute, type: "info", teamSide: t.side, text: `${t.cfg.shortName} slow it down and keep the ball — running down the clock.` });
+  }
 }
 
 self.onmessage = (e: MessageEvent<WorkerInbound>) => {
@@ -537,7 +603,7 @@ self.onmessage = (e: MessageEvent<WorkerInbound>) => {
   switch (msg.type) {
     case "start":
       speed = msg.speed ?? 1;
-      begin(msg.fixtureId, msg.home, msg.away, speed);
+      begin(msg.fixtureId, msg.home, msg.away, speed, msg.userTeamId);
       break;
     case "speed":
       speed = msg.speed;
@@ -551,6 +617,9 @@ self.onmessage = (e: MessageEvent<WorkerInbound>) => {
     case "instant":
       instant = true;
       paused = false;
+      break;
+    case "shout":
+      applyShout(msg.id);
       break;
   }
 };

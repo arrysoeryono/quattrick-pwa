@@ -45,6 +45,7 @@ export function generateFixtures(teamIds: number[], seasonStart: Date): Fixture[
         played: false,
         homeGoals: null,
         awayGoals: null,
+        competition: "league",
       });
     });
   });

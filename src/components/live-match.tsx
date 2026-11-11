@@ -5,13 +5,48 @@ import { useAppStore } from "@/lib/store/gameStore";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { cn } from "@/lib/utils";
-import { Goal, Pause, Play, Square, Zap } from "lucide-react";
+import { Goal, Megaphone, Pause, Play, Shield, Square, Timer, Zap } from "lucide-react";
 
 function eventIcon(type: string) {
   switch (type) {
     case "goal": return <Goal className="h-3.5 w-3.5 text-emerald-400 shrink-0 mt-0.5" aria-hidden />;
     case "card": return <Square className="h-3 w-3 text-amber-400 fill-amber-400 shrink-0 mt-1" aria-hidden />;
+    case "info": return <Megaphone className="h-3.5 w-3.5 text-sky-400 shrink-0 mt-0.5" aria-hidden />;
     default: return <span className="h-1.5 w-1.5 rounded-full bg-slate-600 shrink-0 mt-2" aria-hidden />;
+  }
+}
+
+/* ---------- v4.4 crowd audio + haptics ---------- */
+function playCrowdRoar(enabled: boolean) {
+  if (!enabled || typeof window === "undefined") return;
+  try {
+    const Ctx = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!Ctx) return;
+    const ctx = new Ctx();
+    const dur = 1.6;
+    const buffer = ctx.createBuffer(1, ctx.sampleRate * dur, ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < data.length; i++) {
+      const t = i / data.length;
+      // swelling white-noise roar
+      data[i] = (Math.random() * 2 - 1) * Math.sin(Math.PI * t) * 0.5;
+    }
+    const src = ctx.createBufferSource();
+    src.buffer = buffer;
+    const filter = ctx.createBiquadFilter();
+    filter.type = "bandpass";
+    filter.frequency.value = 900;
+    filter.Q.value = 0.7;
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0.001, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.5, ctx.currentTime + 0.15);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + dur);
+    src.connect(filter).connect(gain).connect(ctx.destination);
+    src.start();
+    src.stop(ctx.currentTime + dur);
+    if (navigator.vibrate) navigator.vibrate([90, 40, 160]);
+  } catch {
+    /* audio unavailable */
   }
 }
 
@@ -24,6 +59,8 @@ export function LiveMatch() {
   const [speed, setSpeed] = useState(1);
   const [paused, setPaused] = useState(false);
   const feedRef = useRef<HTMLDivElement>(null);
+  const lastGoalCount = useRef(0);
+  const shout = useAppStore((s) => s.shout);
 
   const fx = game?.fixtures.find((f) => f.id === liveFixtureId);
   const homeId = fx?.homeId ?? 0;
@@ -35,6 +72,16 @@ export function LiveMatch() {
   useEffect(() => {
     feedRef.current?.scrollTo({ top: 0, behavior: "smooth" });
   }, [liveSnapshot?.events.length]);
+
+  // goal roar + haptics
+  useEffect(() => {
+    if (!liveSnapshot) return;
+    const goals = liveSnapshot.homeGoals + liveSnapshot.awayGoals;
+    if (goals > lastGoalCount.current) {
+      lastGoalCount.current = goals;
+      playCrowdRoar(useAppStore.getState().game?.soundEnabled ?? true);
+    }
+  }, [liveSnapshot?.homeGoals, liveSnapshot?.awayGoals, liveSnapshot]);
 
   if (!liveSnapshot || !game || !dataset) return null;
 
@@ -85,6 +132,29 @@ export function LiveMatch() {
         </div>
         <Progress value={progress} className="mt-3 h-1 bg-slate-800" aria-label="Match progress" />
 
+        {/* momentum meter */}
+        {typeof liveSnapshot.momentum === "number" && (
+          <div className="mt-3" aria-label="Match momentum">
+            <div className="flex items-center justify-between text-[9px] font-bold uppercase tracking-wider text-slate-500">
+              <span className={cn(liveSnapshot.momentum > 15 && "text-emerald-400")}>{displayNames[0]}</span>
+              <span>Momentum</span>
+              <span className={cn(liveSnapshot.momentum < -15 && "text-sky-400")}>{displayNames[1]}</span>
+            </div>
+            <div className="relative mt-1 h-2 rounded-full bg-slate-800 overflow-hidden">
+              <div className="absolute inset-y-0 left-1/2 w-px bg-slate-600" aria-hidden />
+              <div
+                className={cn("absolute inset-y-0 rounded-full transition-all duration-700", liveSnapshot.momentum >= 0 ? "bg-emerald-500" : "bg-sky-500")}
+                style={{
+                  width: `${Math.min(50, Math.abs(liveSnapshot.momentum) / 2)}%`,
+                  left: liveSnapshot.momentum >= 0 ? "50%" : undefined,
+                  right: liveSnapshot.momentum < 0 ? "50%" : undefined,
+                }}
+                aria-hidden
+              />
+            </div>
+          </div>
+        )}
+
         {/* stats */}
         <div className="mt-3 grid grid-cols-3 gap-2 text-center text-[11px] text-slate-400">
           <div>
@@ -130,6 +200,35 @@ export function LiveMatch() {
           <Zap className="h-3.5 w-3.5 mr-1" aria-hidden />
           Skip to FT
         </Button>
+      </div>
+
+      {/* v4.4 touchline shouts */}
+      <div className="rounded-xl border border-slate-800 bg-slate-950/50 p-3">
+        <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 mb-2 flex items-center gap-1.5">
+          <Megaphone className="h-3.5 w-3.5" aria-hidden /> Touchline shouts
+          <span className="ml-auto font-mono text-[10px] text-slate-600">{liveSnapshot.shoutsLeft ?? 3} left</span>
+        </p>
+        <div className="grid grid-cols-2 gap-1.5">
+          {([
+            { id: "go-all-out" as const, label: "Go all out", icon: Goal },
+            { id: "park-the-bus" as const, label: "Park the bus", icon: Shield },
+            { id: "press-hard" as const, label: "Press hard", icon: Zap },
+            { id: "time-waste" as const, label: "Run the clock", icon: Timer },
+          ]).map(({ id, label, icon: Icon }) => (
+            <Button
+              key={id}
+              variant="outline"
+              size="sm"
+              className="h-9 border-slate-700 text-[11px] font-semibold"
+              disabled={(liveSnapshot.shoutsLeft ?? 3) <= 0}
+              onClick={() => shout(id)}
+              aria-label={`Shout: ${label}`}
+            >
+              <Icon className="h-3.5 w-3.5 mr-1.5" aria-hidden />
+              {label}
+            </Button>
+          ))}
+        </div>
       </div>
 
       {/* commentary */}
