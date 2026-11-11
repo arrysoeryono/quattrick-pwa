@@ -14,6 +14,7 @@ import { COACH_LEVELS, coachMultiplier } from "@/lib/game/advance";
 import {
   FOCUS_POOL,
   GK_FOCUS_POOL,
+  GK_TRAINING_FOCUSES,
   INTENSITY_META,
   MENTOR_WEEKS,
   PLAYSTYLES,
@@ -29,7 +30,7 @@ import {
 } from "@/lib/game/development";
 import { getFormation } from "@/lib/game/formations";
 import { effectiveOvr } from "@/lib/game/tactics";
-import { isGKAttributes } from "@/lib/game/attributes";
+import { GK_ATTR_LABELS, isGKAttributes } from "@/lib/game/attributes";
 import { cn } from "@/lib/utils";
 import { Dumbbell, GraduationCap, GitBranch, Repeat, Star, Users } from "lucide-react";
 import type { PlayerState, TrainingFocus, TrainingIntensity } from "@/lib/game/types";
@@ -41,6 +42,23 @@ const FOCUS_LABEL: Record<TrainingFocus, string> = {
   technical: "Technical",
   pace: "Pace",
   shooting: "Finishing",
+  // keeper-native focuses
+  "shot-stopping": "Shot Stopping",
+  handling: "Handling",
+  positioning: "Positioning",
+  distribution: "Distribution",
+  agility: "Agility",
+};
+
+/** Old saves may carry an outfield-named focus on a keeper. Map each legacy
+ *  value to the keeper-native focus with the closest growth pool so the UI can
+ *  still highlight an active button. The engine keeps resolving the raw value. */
+const LEGACY_GK_FOCUS_MAP: Partial<Record<TrainingFocus, TrainingFocus>> = {
+  attacking: "distribution",
+  defensive: "handling",
+  technical: "distribution",
+  pace: "agility",
+  shooting: "positioning",
 };
 
 export function DevelopmentPanel({ player }: { player: PlayerState }) {
@@ -52,6 +70,11 @@ export function DevelopmentPanel({ player }: { player: PlayerState }) {
     [player],
   );
   if (!game) return null;
+
+  const isGK = isGKAttributes(player.attributes);
+  const focusList: readonly TrainingFocus[] = isGK ? GK_TRAINING_FOCUSES : TRAINING_FOCUSES;
+  const rawFocus = player.trainingPlan?.focus ?? "balanced";
+  const activeFocus = isGK ? (LEGACY_GK_FOCUS_MAP[rawFocus] ?? rawFocus) : rawFocus;
 
   const coach = COACH_LEVELS[game.staff?.coachLevel ?? "Accomplished"];
   const inLineup = game.lineup.includes(player.id);
@@ -172,15 +195,15 @@ export function DevelopmentPanel({ player }: { player: PlayerState }) {
           <Dumbbell className="h-3.5 w-3.5" aria-hidden /> Weekly training plan
         </p>
         <div className="grid grid-cols-3 gap-1.5">
-          {TRAINING_FOCUSES.map((f) => (
+          {focusList.map((f) => (
             <button
               key={f}
               type="button"
               onClick={() => setPlan({ focus: f })}
-              aria-pressed={player.trainingPlan?.focus === f}
+              aria-pressed={activeFocus === f}
               className={cn(
                 "min-h-[34px] rounded-lg border text-[11px] font-semibold transition-colors",
-                player.trainingPlan?.focus === f
+                activeFocus === f
                   ? "border-emerald-500/60 bg-emerald-500/10 text-emerald-400"
                   : "border-slate-800 bg-slate-950/40 text-slate-400 hover:border-slate-700",
               )}
@@ -189,9 +212,12 @@ export function DevelopmentPanel({ player }: { player: PlayerState }) {
             </button>
           ))}
         </div>
-        {player.trainingPlan?.focus !== "balanced" && (
+        {rawFocus !== "balanced" && (
           <p className="text-[10px] text-slate-600 mt-1.5">
-            Growth biased 70/30 into: {(isGKAttributes(player.attributes) ? GK_FOCUS_POOL : FOCUS_POOL)[player.trainingPlan?.focus]?.join(", ")}
+            Growth biased 70/30 into:{" "}
+            {isGK
+              ? (GK_FOCUS_POOL[rawFocus] ?? []).map((a) => GK_ATTR_LABELS[a]).join(" + ")
+              : (FOCUS_POOL[rawFocus] ?? []).join(", ")}
           </p>
         )}
         <div className="grid grid-cols-3 gap-1.5 mt-2" role="group" aria-label="Training intensity">

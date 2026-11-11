@@ -55,6 +55,9 @@ export function keyAttributes(pos: PositionCode): AttrKey[] {
 
 export const TRAINING_FOCUSES = ["balanced", "attacking", "defensive", "technical", "pace", "shooting"] as const;
 
+/** Focus list shown for goalkeepers — keeper-native training concepts. */
+export const GK_TRAINING_FOCUSES = ["balanced", "shot-stopping", "handling", "positioning", "distribution", "agility"] as const;
+
 /** Attribute pool a focus biases growth toward (outfield players). */
 export const FOCUS_POOL: Record<string, OutfieldAttrKey[]> = {
   attacking: ["shooting", "dribbling", "pace"],
@@ -64,9 +67,16 @@ export const FOCUS_POOL: Record<string, OutfieldAttrKey[]> = {
   shooting: ["shooting", "pace"],
 };
 
-/** Same focuses, keeper-flavoured pools. */
+/** Keeper-flavoured pools keyed by focus id. The outfield-named keys at the
+ *  bottom are legacy values from old saves and remain resolvable. */
 export const GK_FOCUS_POOL: Record<string, GkAttrKey[]> = {
   balanced: ["diving", "handling", "reflexes", "positioning", "kicking", "speed"],
+  "shot-stopping": ["diving", "reflexes"],
+  handling: ["handling", "positioning"],
+  positioning: ["positioning", "diving"],
+  distribution: ["kicking", "handling"],
+  agility: ["speed", "reflexes"],
+  // legacy outfield-named focuses (pre-revision saves)
   attacking: ["kicking", "speed"],
   defensive: ["diving", "handling"],
   technical: ["kicking", "handling"],

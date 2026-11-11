@@ -77,7 +77,10 @@ export interface Dataset {
 
 export type SquadRole = "Star Player" | "Important" | "Rotation" | "Prospect";
 
-export type TrainingFocus = "balanced" | "attacking" | "defensive" | "technical" | "pace" | "shooting";
+export type TrainingFocus =
+  | "balanced" | "attacking" | "defensive" | "technical" | "pace" | "shooting"
+  // keeper-native focuses (GK players only)
+  | "shot-stopping" | "handling" | "positioning" | "distribution" | "agility";
 export type TrainingIntensity = "light" | "normal" | "intense";
 
 export interface TrainingPlan {
