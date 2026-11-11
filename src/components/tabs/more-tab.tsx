@@ -11,7 +11,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "
 import { formatDate, formatMoney } from "@/lib/format";
 import { ACHIEVEMENTS } from "@/lib/game/career";
 import { cn } from "@/lib/utils";
-import { Cloud, CloudOff, Database, Download, FileSpreadsheet, HardDrive, RefreshCw, Save, Trash2, Trophy, Upload } from "lucide-react";
+import { Cloud, CloudDownload, CloudOff, Database, Download, FileSpreadsheet, HardDrive, RefreshCw, Save, Trash2, Trophy, Upload } from "lucide-react";
 
 export function MoreTab() {
   const dataset = useAppStore((s) => s.dataset);
@@ -28,11 +28,22 @@ export function MoreTab() {
   const importDataset = useAppStore((s) => s.importDataset);
   const disposeRunner = useAppStore((s) => s.disposeRunner);
 
+  const pullCloudDatabase = useAppStore((s) => s.pullCloudDatabase);
+
   const [dbModal, setDbModal] = useState(false);
   const [cloudSheet, setCloudSheet] = useState(false);
   const [cloudSaves, setCloudSaves] = useState<CloudSaveMeta[]>([]);
   const [cloudLoading, setCloudLoading] = useState(false);
   const [busyMsg, setBusyMsg] = useState<string | null>(null);
+  const [pulling, setPulling] = useState(false);
+
+  const handlePullCloud = async () => {
+    setPulling(true);
+    const res = await pullCloudDatabase();
+    setPulling(false);
+    setBusyMsg(res.message);
+    setTimeout(() => setBusyMsg(null), res.ok ? 5000 : 4000);
+  };
 
   useEffect(() => {
     disposeRunner();
@@ -203,6 +214,18 @@ export function MoreTab() {
             Export cloud DB
           </Button>
         </div>
+        <Button
+          variant="outline"
+          className="mt-2 w-full h-10 border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/10"
+          onClick={() => void handlePullCloud()}
+          disabled={pulling || cloudOnline === false}
+        >
+          {pulling ? <RefreshCw className="h-4 w-4 mr-1.5 animate-spin" aria-hidden /> : <CloudDownload className="h-4 w-4 mr-1.5" aria-hidden />}
+          {pulling ? "Pulling from Neon..." : "Pull cloud DB to this device"}
+        </Button>
+        <p className="text-[10px] text-slate-600 mt-2 leading-snug">
+          Imported an Excel database on another device? Tap this to download the latest Neon master database here — new clubs and players then appear in onboarding and the transfer market.
+        </p>
       </section>
 
       {/* local saves */}

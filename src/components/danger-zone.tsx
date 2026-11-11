@@ -241,9 +241,9 @@ export function DangerZone() {
             <ul className="mt-2 space-y-1.5 text-[11px] text-rose-300/80 list-disc pl-7 pr-1 marker:text-rose-400/60">
               <li>Every local career save on this device (IndexedDB) will be deleted</li>
               <li>Your active career, season stats, records and trophies will be gone</li>
-              <li>The player &amp; club database resets back to factory defaults</li>
+              <li>The player &amp; club database is wiped, then re-synced fresh from the Neon cloud (factory defaults only when offline)</li>
               <li>Onboarding starts over as if you just installed the app</li>
-              <li>Cloud copies in Neon Postgres are NOT removed — delete those separately first if wanted</li>
+              <li>Cloud career saves in Neon Postgres are NOT removed — delete those separately first if wanted</li>
             </ul>
           </div>
 

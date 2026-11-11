@@ -73,6 +73,9 @@ interface AppStore {
   saveToCloud: () => Promise<{ ok: boolean; message: string }>;
   fetchCloudSaves: () => Promise<CloudSaveMeta[]>;
   loadCloudSave: (id: string) => Promise<{ ok: boolean; message: string }>;
+
+  /* master database sync (device <- Neon) */
+  pullCloudDatabase: () => Promise<{ ok: boolean; message: string }>;
 }
 
 export type MatchConfigInput = MatchTeamConfig;
@@ -175,7 +178,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
     set({ saves, ...(stillActive ? { game: null, saveId: null, phase: "onboarding" } : {}) });
   },
 
-  /** Danger Zone — nuclear option: wipe every local save + the active dataset, restore factory state. */
+  /** Danger Zone — nuclear option: wipe every local save + the active dataset, then re-bootstrap fresh from the Neon cloud database (builtin fallback when offline). */
   resetAllData: async () => {
     get().disposeRunner();
     try {
@@ -185,11 +188,30 @@ export const useAppStore = create<AppStore>((set, get) => ({
     } catch {
       /* IndexedDB unavailable — continue with in-memory reset */
     }
-    const dataset = generateDefaultDataset();
-    await persistActiveDataset(dataset, "builtin").catch(() => undefined);
+    // Re-pull the latest cloud master database so the device ends up with the
+    // freshly imported Excel data instead of stale factory defaults.
+    let dataset: Dataset | null = null;
+    let source = "builtin";
+    try {
+      const res = await fetch("/api/bootstrap", { signal: AbortSignal.timeout(8000) });
+      if (res.ok) {
+        const json = (await res.json()) as { dataset: Dataset; source: string };
+        if (json.dataset?.players?.length) {
+          dataset = json.dataset;
+          source = json.source === "neon" ? "cloud" : "builtin";
+        }
+      }
+    } catch {
+      /* offline — fall back to builtin below */
+    }
+    if (!dataset) {
+      dataset = generateDefaultDataset();
+      source = "builtin";
+    }
+    await persistActiveDataset(dataset, source).catch(() => undefined);
     set({
       dataset,
-      datasetSource: "builtin",
+      datasetSource: source,
       game: null,
       saveId: null,
       saves: [],
@@ -372,6 +394,25 @@ export const useAppStore = create<AppStore>((set, get) => ({
     } catch (e) {
       set({ cloudOnline: false });
       return { ok: false, message: e instanceof Error ? e.message : "Cloud load failed" };
+    }
+  },
+
+  /* ---------- master database sync (device <- Neon) ---------- */
+  pullCloudDatabase: async () => {
+    try {
+      const res = await fetch("/api/bootstrap", { signal: AbortSignal.timeout(12000) });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json = (await res.json()) as { dataset: Dataset; source: string };
+      if (!json.dataset?.players?.length) throw new Error("Cloud database is empty");
+      await get().importDataset(json.dataset, "cloud");
+      set({ cloudOnline: true });
+      return {
+        ok: true,
+        message: `Cloud database pulled — ${json.dataset.teams.length} clubs and ${json.dataset.players.length} players are now active on this device`,
+      };
+    } catch (e) {
+      set({ cloudOnline: false });
+      return { ok: false, message: e instanceof Error ? `Sync failed: ${e.message}` : "Sync failed" };
     }
   },
 }));
