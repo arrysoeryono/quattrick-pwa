@@ -228,6 +228,33 @@ export interface SetPieceAssignments {
   cornerRight: number | null;
 }
 
+/** v4.7 — saved tactic snapshot from the tactics menu (max 6 per career). */
+export interface TacticPreset {
+  id: string;
+  name: string;
+  formationName: string;
+  mentality: Mentality;
+  gamePlan: string;
+  sliders: TacticSliders;
+  lineup: (number | null)[]; // aligned to the preset's formation slots
+}
+
+/** v4.7 — team-level weekly training balance.
+ *  0 = All Out Energy (recovery) … 100 = All Out Performance (sharpness). */
+export interface TeamTrainingPlan {
+  balance: number;
+}
+
+export type DrillGrade = "A" | "B" | "C" | "D";
+
+/** v4.7 — pre-match drills outcome. Special PlayStyles apply to the next
+ *  match only and are cleared once the fixture has been played. */
+export interface PreMatchDrillResult {
+  fixtureRound: number;
+  grades: { drill: string; grade: DrillGrade }[];
+  grants: { playerId: number; styleId: string }[];
+}
+
 export interface Tactics {
   formationName: string;
   mentality: Mentality;
@@ -346,6 +373,11 @@ export interface GameState {
   unbeatenRun: number;
   cleanSheetRun: number;
   seasonShots: number; // simple career counters for achievements
+
+  /* ---- v4.7 training & presets ---- */
+  tacticPresets: TacticPreset[]; // max 6
+  teamTraining: TeamTrainingPlan;
+  preMatchDrills: PreMatchDrillResult | null;
 }
 
 export interface SaveRecord {

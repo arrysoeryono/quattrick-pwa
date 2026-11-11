@@ -165,6 +165,9 @@ export function createCareerState(managerName: string, clubId: number, dataset: 
     unbeatenRun: 0,
     cleanSheetRun: 0,
     seasonShots: 0,
+    tacticPresets: [],
+    teamTraining: { balance: 50 },
+    preMatchDrills: null,
   };
 }
 
@@ -175,6 +178,10 @@ export function migrateGameState(raw: GameState): GameState {
   const game = raw as GameState;
   game.tactics = migrateTactics(game.tactics, game.tactics?.formationName ?? "4-3-3 Holding");
   if (!game.staff) game.staff = { coachLevel: "Accomplished" };
+  // v4.7: tactic presets, team training balance, pre-match drills
+  if (!Array.isArray(game.tacticPresets)) game.tacticPresets = [];
+  if (!game.teamTraining || typeof game.teamTraining.balance !== "number") game.teamTraining = { balance: 50 };
+  if (game.preMatchDrills === undefined) game.preMatchDrills = null;
   for (const p of game.players) {
     if (!p.trainingPlan) p.trainingPlan = { focus: "balanced", intensity: "normal" };
     if (p.retrain === undefined) p.retrain = null;
@@ -440,6 +447,11 @@ export function advanceAfterUserMatch(
   const squadIds = new Set(game.players.map((p) => p.id));
   const diff = DIFFICULTY_META[game.difficulty] ?? DIFFICULTY_META.pro;
   const achievementsBefore = new Set(game.achievements.map((a) => a.id));
+  // v4.7 — drill grants were consumed when the match config was built at kickoff;
+  // the temporary special PlayStyles expire after this fixture.
+  game.preMatchDrills = null;
+  // 0 = All Out Energy (recovery) … 100 = All Out Performance (sharpness)
+  const trainingBalance = game.teamTraining?.balance ?? 50;
 
   /* 1. apply user fixture (league or cup) */
   const fx = game.fixtures.find((f) => f.id === userResult.fixtureId);
@@ -569,7 +581,9 @@ export function advanceAfterUserMatch(
       p.sharpness = Math.min(100, p.sharpness + 18);
       p.stamina = Math.max(40, p.stamina - 22);
     } else {
-      p.sharpness = Math.max(0, p.sharpness - 9);
+      // team training balance shifts the no-match sharpness drift:
+      // All Out Performance keeps match sharpness alive, All Out Energy lets it fade
+      p.sharpness = Math.max(0, Math.min(100, p.sharpness - 9 + (trainingBalance - 50) * 0.2));
       p.morale = Math.max(5, Math.min(100, p.morale + (won ? 2 : drew ? 0 : -3)));
     }
   }
@@ -593,7 +607,9 @@ export function advanceAfterUserMatch(
     const mentor = p.mentor ? game.players.find((m) => m.id === p.mentor!.mentorId) ?? null : null;
     if (p.mentor && !mentor) p.mentor = null; // mentor left the club
     const train = weeklyDevelopment(p, mins, coachQ, rng, mentor);
-    p.stamina = Math.min(100, (p.stamina ?? 100) + 14 + train.staminaDelta);
+    // All Out Energy recovers up to +5 extra stamina per week, All Out Performance up to -5
+    const recover = 14 + (50 - trainingBalance) * 0.1;
+    p.stamina = Math.min(100, (p.stamina ?? 100) + recover + train.staminaDelta);
     if (train.injury && p.injuryWeeks === 0) {
       p.injuryWeeks = 1;
       pushNews(game, "injury", `${p.name} injured in training`, "An intense gym session ended with a knock. One week on the sidelines.");
@@ -731,6 +747,12 @@ export function refreshLineup(game: GameState): void {
 
 /** Rebuild the MatchTeamConfig for the user's club from current lineup. */
 export function buildUserMatchTeam(game: GameState, team: TeamRow) {
+  // v4.7 — pre-match drill grants: temporary special PlayStyles for this fixture only
+  const drillGrant = new Map((game.preMatchDrills?.grants ?? []).map((g) => [g.playerId, g.styleId]));
+  const drillStyle = (pid: number): string[] => {
+    const s = drillGrant.get(pid);
+    return s ? [s] : [];
+  };
   const players = game.lineup.map((id, i) => {
     const p = game.players.find((x) => x.id === id);
     if (!p) return null;
@@ -745,7 +767,7 @@ export function buildUserMatchTeam(game: GameState, team: TeamRow) {
       morale: p.morale,
       age: p.age,
       instr: game.tactics.instructions?.[String(i)] ?? {},
-      playStyles: computePlayStyles(p).map((s) => s.id),
+      playStyles: [...computePlayStyles(p).map((s) => s.id), ...drillStyle(p.id)],
     };
   });
   const formationObj = getFormation(game.tactics.formationName);
@@ -765,7 +787,7 @@ export function buildUserMatchTeam(game: GameState, team: TeamRow) {
         id: c.id, name: c.name, position: c.position, ovr: c.overallRating,
         attributes: c.attributes, stamina: c.stamina, sharpness: c.sharpness, morale: c.morale, age: c.age,
         instr: game.tactics.instructions?.[String(i)] ?? {},
-        playStyles: computePlayStyles(c).map((s) => s.id),
+        playStyles: [...computePlayStyles(c).map((s) => s.id), ...drillStyle(c.id)],
       };
     }
   }

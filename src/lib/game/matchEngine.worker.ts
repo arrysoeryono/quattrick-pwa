@@ -257,7 +257,9 @@ function teamPower(t: TeamSim, zone: "att" | "mid" | "def"): number {
     let eff = p.ovr * staminaFactor;
     // playstyle flavour
     if (zone === "def" && (p.playStyles.has("rock") || p.playStyles.has("powerhouse"))) eff *= 1.03;
+    if (zone === "def" && p.playStyles.has("drill-wall")) eff *= 1.04; // pre-match drill: Disciplined Wall
     if (zone === "mid" && p.playStyles.has("maestro")) eff *= 1.02;
+    if (zone === "mid" && p.playStyles.has("drill-press")) eff *= 1.02; // pre-match drill: Press Machine
 
     if (zone === "att") {
       let weight = isAtt(p.slot) ? 1.3 : isDef(p.slot) ? 0.15 : 0.45;
@@ -321,7 +323,7 @@ function fill(tpl: string, p: SimPlayer): string {
 /* ---------- shot resolution ---------- */
 function resolveShot(att: TeamSim, def: TeamSim, shooter: SimPlayer, dist: number, angleDeg: number, pressure: number, xgMult = 1): void {
   const angleFactor = Math.sin((angleDeg * Math.PI) / 180);
-  const finishBonus = (1 + (attrValue(shooter.attributes, "shooting", 25) - 70) / 160) * att.mods.finish * (shooter.playStyles.has("clinical") ? 1.06 : 1);
+  const finishBonus = (1 + (attrValue(shooter.attributes, "shooting", 25) - 70) / 160) * att.mods.finish * (shooter.playStyles.has("clinical") || shooter.playStyles.has("drill-finish") ? 1.06 : 1);
   const xg = Math.max(0.015, Math.min(0.72, 1.15 * Math.exp(-dist / 9.2) * (0.35 + 0.65 * angleFactor) * pressure * finishBonus * xgMult));
   // keeper quality shapes how much of that xG actually turns into goals
   const gk = onPitch(def).find((p) => p.slot === "GK");
@@ -379,6 +381,7 @@ function simulateMinute(): void {
       let drain = 0.34 + (100 - p.staminaAttr) / 100 * 0.38 + t.mods.staminaDrain + (t.mentality === "attacking" ? 0.05 : 0);
       if (p.playStyles.has("engine")) drain *= 0.88;
       else if (p.playStyles.has("rapid")) drain *= 0.93;
+      else if (p.playStyles.has("drill-press")) drain *= 0.93;
       p.staminaNow = Math.max(15, p.staminaNow - drain);
     }
   }

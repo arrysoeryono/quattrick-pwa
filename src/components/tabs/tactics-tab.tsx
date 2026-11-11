@@ -12,7 +12,7 @@ import { FORMATIONS, formationCoordinates, getFormation, positionAffinity, affin
 import { autoPickLineup, effectiveOvr, squadChemistry } from "@/lib/game/tactics";
 import { GAME_PLANS, SLIDER_META, ATTACK_INSTRUCTIONS, DEFEND_INSTRUCTIONS, instructionsForGroup } from "@/lib/game/tacticPresets";
 import { cn } from "@/lib/utils";
-import { ClipboardList, Sparkles, Wand2 } from "lucide-react";
+import { ClipboardList, Dumbbell, Save, Sparkles, Trash2, Wand2 } from "lucide-react";
 import type { PlayerState, SetPieceAssignments } from "@/lib/game/types";
 
 const CATEGORY_TONE: Record<string, string> = {
@@ -64,6 +64,8 @@ export function TacticsTab() {
   const [formationDialog, setFormationDialog] = useState(false);
   const [setPieceDialog, setSetPieceDialog] = useState(false);
   const [slotDialog, setSlotDialog] = useState<number | null>(null);
+  const [presetDialog, setPresetDialog] = useState(false);
+  const [presetName, setPresetName] = useState("");
 
   const formation = useMemo(() => (game ? getFormation(game.tactics.formationName) : null), [game]);
   const coords = useMemo(() => (formation ? formationCoordinates(formation.positions) : []), [formation]);
@@ -167,6 +169,47 @@ export function TacticsTab() {
     });
   };
 
+  const savePreset = () => {
+    update((g) => {
+      if (g.tacticPresets.length >= 6) return;
+      g.tacticPresets = [...g.tacticPresets, {
+        id: Math.random().toString(36).slice(2, 10),
+        name: presetName.trim() || `Preset ${g.tacticPresets.length + 1}`,
+        formationName: g.tactics.formationName,
+        mentality: g.tactics.mentality,
+        gamePlan: g.tactics.gamePlan,
+        sliders: { ...g.tactics.sliders },
+        lineup: [...g.lineup],
+      }];
+    });
+    setPresetName("");
+    setPresetDialog(false);
+  };
+
+  const applyPreset = (id: string) => {
+    update((g) => {
+      const preset = g.tacticPresets.find((p) => p.id === id);
+      if (!preset) return;
+      g.tactics.formationName = preset.formationName;
+      g.tactics.mentality = preset.mentality;
+      g.tactics.gamePlan = preset.gamePlan;
+      g.tactics.sliders = { ...preset.sliders };
+      g.tactics.instructions = {};
+      // restore the saved lineup, dropping players who left the club, then fill gaps
+      const squadIds = new Set(g.players.map((p) => p.id));
+      const valid = preset.lineup.map((pid) => (pid !== null && squadIds.has(pid) ? pid : null));
+      while (valid.length < 11) valid.push(null);
+      const auto = autoPickLineup(g.players, preset.formationName);
+      g.lineup = valid.map((pid, i) => (pid !== null ? pid : auto[i]));
+    });
+  };
+
+  const deletePreset = (id: string) => {
+    update((g) => {
+      g.tacticPresets = g.tacticPresets.filter((p) => p.id !== id);
+    });
+  };
+
   const slotPlayer = (i: number): PlayerState | null => game.players.find((p) => p.id === game.lineup[i]) ?? null;
   const lineupPlayers = game.lineup
     .map((id) => game.players.find((p) => p.id === id))
@@ -175,6 +218,17 @@ export function TacticsTab() {
   const slotGroup = selectedSlot !== null ? positionGroup(formation.positions[selectedSlot]) : null;
   const slotInstr = slotGroup ? instructionsForGroup(slotGroup) : null;
   const slotPlayerInstr = selectedSlot !== null ? t.instructions?.[String(selectedSlot)] : undefined;
+  const balance = game.teamTraining?.balance ?? 50;
+  const trainingTone = balance >= 67
+    ? { badge: "border-emerald-500/40 text-emerald-400", label: "All Out Performance" }
+    : balance <= 33
+      ? { badge: "border-sky-500/40 text-sky-400", label: "All Out Energy" }
+      : { badge: "border-slate-600 text-slate-300", label: "Balanced workload" };
+  const trainingEffect = balance >= 67
+    ? "Match sharpness stays alive between games. Stamina recovers slowly (−5/wk)."
+    : balance <= 33
+      ? "Stamina recovers fast (+5/wk). Sharpness fades quickly between matches."
+      : "Steady recovery with natural sharpness drift. No extreme cost either way.";
 
   return (
     <div className="space-y-3">
@@ -323,6 +377,113 @@ export function TacticsTab() {
           Tap a chip to swap players and add per-player instructions. Amber ring = custom instruction.
         </p>
       </section>
+
+      {/* v4.7 — tactic presets */}
+      <section aria-label="Tactic presets" className="rounded-xl border border-slate-800 bg-slate-950/40 p-3">
+        <div className="flex items-center justify-between mb-2">
+          <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+            <Save className="h-3.5 w-3.5 text-emerald-400" aria-hidden /> Tactic presets
+          </p>
+          <Badge variant="outline" className="text-[9px] border-slate-700 text-slate-400">
+            {game.tacticPresets.length}/6
+          </Badge>
+        </div>
+        {game.tacticPresets.length === 0 ? (
+          <p className="text-[11px] text-slate-600 mb-2">
+            Save up to 6 complete tactics — formation, starting XI, game plan and sliders — then swap them in one tap.
+          </p>
+        ) : (
+          <div className="grid grid-cols-2 gap-1.5 mb-2">
+            {game.tacticPresets.map((preset) => (
+              <div key={preset.id} className="rounded-lg border border-slate-800 bg-slate-950/60 p-2">
+                <p className="text-xs font-bold text-slate-200 truncate">{preset.name}</p>
+                <p className="text-[10px] text-slate-500 truncate">{preset.formationName} · {preset.mentality}</p>
+                <div className="flex items-center gap-1 mt-1.5">
+                  <button
+                    type="button"
+                    onClick={() => applyPreset(preset.id)}
+                    className="flex-1 min-h-[28px] rounded-md border border-emerald-500/50 bg-emerald-500/10 text-[10px] font-bold text-emerald-400 hover:bg-emerald-500/20 transition-colors"
+                    aria-label={`Apply preset ${preset.name}`}
+                  >
+                    Apply
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => deletePreset(preset.id)}
+                    className="flex h-7 w-7 items-center justify-center rounded-md border border-rose-500/40 text-rose-400 hover:bg-rose-500/10 transition-colors"
+                    aria-label={`Delete preset ${preset.name}`}
+                  >
+                    <Trash2 className="h-3 w-3" aria-hidden />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+        <Button
+          variant="outline"
+          className="w-full border-slate-700 text-slate-300"
+          disabled={game.tacticPresets.length >= 6}
+          onClick={() => { setPresetName(""); setPresetDialog(true); }}
+          aria-label="Save current tactic as preset"
+        >
+          <Save className="h-4 w-4 mr-2" aria-hidden />
+          {game.tacticPresets.length >= 6 ? "All 6 slots used — delete one first" : "Save current tactic"}
+        </Button>
+      </section>
+
+      {/* v4.7 — weekly team training balance */}
+      <section aria-label="Weekly training balance" className="rounded-xl border border-slate-800 bg-slate-950/40 p-3 space-y-2">
+        <div className="flex items-center justify-between">
+          <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+            <Dumbbell className="h-3.5 w-3.5 text-emerald-400" aria-hidden /> Weekly training plan
+          </p>
+          <Badge variant="outline" className={cn("text-[9px]", trainingTone.badge)}>{trainingTone.label}</Badge>
+        </div>
+        <Slider
+          value={[balance]}
+          min={0}
+          max={100}
+          step={5}
+          onValueChange={([v]) => update((g) => { g.teamTraining.balance = v; })}
+          aria-label="Training balance between sharpness and recovery"
+          className="[&_[role=slider]]:h-3.5 [&_[role=slider]]:w-3.5"
+        />
+        <div className="flex justify-between">
+          <span className="text-[9px] font-semibold text-sky-400">All Out Energy · recovery</span>
+          <span className="text-[9px] font-semibold text-emerald-400">All Out Performance · sharpness</span>
+        </div>
+        <p className="text-[10px] text-slate-600">{trainingEffect}</p>
+        <p className="text-[10px] text-slate-600">
+          One weekly session for the whole squad — no need to play drills one by one. Applies to every player each week.
+        </p>
+      </section>
+
+      {/* save preset dialog */}
+      <Dialog open={presetDialog} onOpenChange={setPresetDialog}>
+        <DialogContent className="max-w-[360px]">
+          <DialogHeader>
+            <DialogTitle className="text-left">Save tactic preset</DialogTitle>
+            <DialogDescription className="text-left">
+              Snapshots the current formation, starting XI, game plan and sliders. {6 - game.tacticPresets.length} slot{6 - game.tacticPresets.length === 1 ? "" : "s"} left.
+            </DialogDescription>
+          </DialogHeader>
+          <input
+            value={presetName}
+            onChange={(e) => setPresetName(e.target.value)}
+            placeholder={`Preset ${game.tacticPresets.length + 1}`}
+            maxLength={24}
+            aria-label="Preset name"
+            className="w-full h-10 rounded-lg border border-slate-800 bg-slate-950 px-3 text-sm text-slate-200 placeholder:text-slate-600 outline-none focus:border-emerald-500/60"
+          />
+          <div className="flex gap-2">
+            <Button variant="outline" className="flex-1 border-slate-700" onClick={() => setPresetDialog(false)}>Cancel</Button>
+            <Button className="flex-1 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold" onClick={savePreset} aria-label="Confirm save preset">
+              Save preset
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* formation picker dialog */}
       <Dialog open={formationDialog} onOpenChange={setFormationDialog}>

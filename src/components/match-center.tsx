@@ -7,13 +7,22 @@ import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { LiveMatch } from "@/components/live-match";
 import { buildUserMatchTeam, aiFormationFor, getUserNextFixture } from "@/lib/game/advance";
+import { DRILLS, runPreMatchDrills } from "@/lib/game/drills";
+import type { DrillGrade } from "@/lib/game/types";
 import { buildAiTeamConfig, estimateClubStrength } from "@/lib/game/season";
 import { isDerbyFixture } from "@/lib/game/career";
 import { formatDate, formatMoney, ordinal, ratingColor } from "@/lib/format";
 import { computeTable } from "@/lib/game/season";
 import { cn } from "@/lib/utils";
-import { Award, CalendarDays, Flame, Goal, Play, Swords, TrendingUp, Trophy } from "lucide-react";
+import { Award, CalendarDays, Flame, Goal, Play, Star, Swords, TrendingUp, Trophy } from "lucide-react";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+
+const GRADE_TEXT: Record<DrillGrade, string> = {
+  A: "text-emerald-400",
+  B: "text-teal-300",
+  C: "text-amber-400",
+  D: "text-rose-400",
+};
 
 export function MatchCenter() {
   const game = useAppStore((s) => s.game);
@@ -25,6 +34,7 @@ export function MatchCenter() {
   const kickoff = useAppStore((s) => s.kickoff);
   const clearLiveResult = useAppStore((s) => s.clearLiveResult);
   const setActiveTab = useAppStore((s) => s.setActiveTab);
+  const update = useAppStore((s) => s.update);
 
   const nextFixture = useMemo(() => (game ? getUserNextFixture(game) : null), [game]);
 
@@ -254,6 +264,86 @@ export function MatchCenter() {
                     </p>
                   </div>
                 )}
+
+                {/* v4.7 — pre-match drills */}
+                {(() => {
+                  const drills = game.preMatchDrills;
+                  const drillsReady = Boolean(drills && drills.fixtureRound === nextFixture.round);
+                  const runDrills = () => {
+                    update((g) => {
+                      g.preMatchDrills = runPreMatchDrills(g, nextFixture.round);
+                    });
+                  };
+                  return (
+                    <div className="mt-3 rounded-lg border border-slate-800 bg-slate-950/60 p-2.5" aria-label="Pre-match drills">
+                      <div className="flex items-center justify-between mb-1">
+                        <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Pre-match drills</p>
+                        {drillsReady && drills && drills.grants.length > 0 && (
+                          <Badge variant="outline" className="text-[9px] border-amber-500/50 text-amber-400 gap-0.5">
+                            <Star className="h-2.5 w-2.5" aria-hidden /> {drills.grants.length} special PlayStyle{drills.grants.length > 1 ? "s" : ""}
+                          </Badge>
+                        )}
+                      </div>
+                      {!drillsReady ? (
+                        <>
+                          <p className="text-[11px] text-slate-500 mb-2">
+                            Run the session once. Grade A/B/C drills unlock special PlayStyles for this match only.
+                          </p>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="w-full border-sky-600/50 text-sky-400 font-bold"
+                            onClick={runDrills}
+                            aria-label="Run pre-match drills session"
+                          >
+                            <Flame className="h-3.5 w-3.5 mr-1.5" aria-hidden />
+                            Run drills session
+                          </Button>
+                        </>
+                      ) : (
+                        <>
+                          <div className="grid grid-cols-3 gap-1.5">
+                            {drills!.grades.map(({ drill, grade }) => {
+                              const def = DRILLS.find((d) => d.id === drill);
+                              return (
+                                <div key={drill} className="rounded-md border border-slate-800 bg-slate-950 p-1.5 text-center" title={def?.desc}>
+                                  <p className="text-[9px] text-slate-500 truncate">{def?.name.replace(" drill", "")}</p>
+                                  <p className={cn("text-base font-black leading-tight", GRADE_TEXT[grade])}>{grade}</p>
+                                </div>
+                              );
+                            })}
+                          </div>
+                          <div className="mt-1.5 space-y-1">
+                            {drills!.grants.map(({ playerId, styleId }) => {
+                              const p = game.players.find((x) => x.id === playerId);
+                              const def = DRILLS.find((d) => d.styleId === styleId);
+                              return (
+                                <div key={`${playerId}-${styleId}`} className="flex items-center justify-between gap-2 rounded-md border border-amber-500/30 bg-amber-500/5 px-2 py-1" title={def?.styleDesc}>
+                                  <span className="text-[11px] font-semibold text-slate-200 truncate">{p?.name ?? "Player"}</span>
+                                  <span className="text-[10px] font-bold text-amber-300 shrink-0">★ {def?.styleName}</span>
+                                </div>
+                              );
+                            })}
+                            {drills!.grants.length === 0 && (
+                              <p className="text-[10px] text-slate-600">Grades were too low — no special PlayStyles unlocked this time.</p>
+                            )}
+                          </div>
+                          <div className="flex items-center justify-between mt-1.5">
+                            <p className="text-[9px] text-slate-600">Applies to this match only, expires at full time.</p>
+                            <button
+                              type="button"
+                              onClick={runDrills}
+                              className="text-[10px] text-slate-500 underline hover:text-slate-300"
+                              aria-label="Run drills again"
+                            >
+                              Run again
+                            </button>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  );
+                })()}
               </>
             );
           })()}
