@@ -340,8 +340,10 @@ export const useAppStore = create<AppStore>((set, get) => {
       }
     },
 
-    /** Danger Zone — nuclear option: wipe every career save (cloud + local cache),
-     *  then re-bootstrap the master database fresh from Neon (builtin fallback offline). */
+    /** Danger Zone — nuclear option: wipe every career save (cloud + local cache)
+     *  AND the whole Neon master database (leagues, teams, players), so the cloud
+     *  is completely clean and a fresh Excel database can be imported. The device
+     *  continues with the builtin dataset until a new database is imported. */
     resetAllData: async () => {
       get().disposeRunner();
       try {
@@ -352,27 +354,39 @@ export const useAppStore = create<AppStore>((set, get) => {
         /* IndexedDB unavailable — continue with in-memory reset */
       }
       clearSavesCache();
-      // wipe cloud careers too — cloud is the source of truth now
+      // 1) wipe cloud careers too — cloud is the source of truth now
       try {
         await fetch(`/api/saves?userId=${SHARED_USER_ID}&all=1`, { method: "DELETE", signal: AbortSignal.timeout(10000) });
       } catch {
         /* offline — cloud rows will be wiped next time reset runs */
       }
-      // Re-pull the latest cloud master database so the device ends up with the
-      // freshly imported Excel data instead of stale factory defaults.
+      // 2) wipe the Neon master database (leagues, teams, players + id sequences)
+      let cloudWiped = false;
+      try {
+        const res = await fetch("/api/database/reset", { method: "DELETE", signal: AbortSignal.timeout(15000) });
+        cloudWiped = res.ok;
+      } catch {
+        /* offline — the cloud master DB is wiped next time reset runs */
+      }
+      // 3) bootstrap again: Neon is empty now, so the device gets the builtin
+      //    dataset until the user imports a fresh Excel database (which re-seeds
+      //    the cloud via /api/database/import).
       let dataset: Dataset | null = null;
       let source = "builtin";
-      try {
-        const res = await fetch("/api/bootstrap", { signal: AbortSignal.timeout(8000) });
-        if (res.ok) {
-          const json = (await res.json()) as { dataset: Dataset; source: string };
-          if (json.dataset?.players?.length) {
-            dataset = json.dataset;
-            source = json.source === "neon" ? "cloud" : "builtin";
+      if (!cloudWiped) {
+        // cloud reset failed (offline?) — try keeping whatever the cloud still holds
+        try {
+          const res = await fetch("/api/bootstrap", { signal: AbortSignal.timeout(8000) });
+          if (res.ok) {
+            const json = (await res.json()) as { dataset: Dataset; source: string };
+            if (json.dataset?.players?.length) {
+              dataset = migrateDatasetGk(json.dataset);
+              source = json.source === "neon" ? "cloud" : "builtin";
+            }
           }
+        } catch {
+          /* offline — fall back to builtin below */
         }
-      } catch {
-        /* offline — fall back to builtin below */
       }
       if (!dataset) {
         dataset = generateDefaultDataset();

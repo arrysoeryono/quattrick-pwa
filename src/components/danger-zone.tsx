@@ -167,7 +167,7 @@ export function DangerZone() {
                 Total items to be deleted: <span className="text-rose-400 tabular-nums">{total}</span>
               </p>
               <p className="text-[10px] text-slate-500 mt-0.5 leading-snug">
-                Cloud careers and local data are all deleted.
+                Local data, cloud careers and the whole cloud master database are all deleted.
               </p>
             </div>
           </div>
@@ -241,7 +241,8 @@ export function DangerZone() {
             <ul className="mt-2 space-y-1.5 text-[11px] text-rose-300/80 list-disc pl-7 pr-1 marker:text-rose-400/60">
               <li>All career saves will be deleted</li>
               <li>Your active career, season stats, records and trophies will be gone on ALL devices</li>
-              <li>The player and club database is reloaded from the cloud</li>
+              <li>The cloud master database in Neon (leagues, clubs, players) is wiped completely</li>
+              <li>Import a new Excel database afterwards to rebuild the world</li>
               <li>Onboarding starts over as if you just installed the app</li>
             </ul>
           </div>
