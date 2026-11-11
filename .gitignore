@@ -56,3 +56,6 @@ server.log
 .zscripts/
 download/
 *.xlsx
+
+# vercel
+.vercel
