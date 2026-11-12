@@ -414,6 +414,15 @@ export interface LiveMatchSnapshot {
   shoutsLeft?: number;
 }
 
+/** v4.9 — EA FC-derived profile sent into the match engine (see lib/game/fc.ts). */
+export interface MatchPlayerFc {
+  /** derived in-game stats (FC specifics); absent for keepers */
+  stats?: Record<string, number>;
+  weakFoot?: number; // 1-5
+  skillMoves?: number; // 1-5
+  acceleRATE?: string; // Explosive / Controlled / Lengthy
+}
+
 /** One player row inside a MatchTeamConfig (starter or bench). */
 export interface MatchPlayerConfig {
   id: number;
@@ -427,6 +436,7 @@ export interface MatchPlayerConfig {
   age: number;
   instr?: PlayerInstruction;
   playStyles?: string[]; // playstyle ids active in the engine
+  fc?: MatchPlayerFc; // v4.9 derived FC profile
 }
 
 export interface MatchTeamConfig {

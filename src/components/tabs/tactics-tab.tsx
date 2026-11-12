@@ -294,6 +294,7 @@ export function TacticsTab() {
               name: player.name,
               eff: effectiveOvr(player, slot),
               affinity: positionAffinity(player.position, slot),
+              naturalPos: player.position,
               sharpness: player.sharpness,
               stamina: player.stamina,
               injured: player.injuryWeeks > 0,

@@ -3,6 +3,7 @@
 import { cn } from "@/lib/utils";
 import { moraleLabel, ratingColor, sharpLabel } from "@/lib/format";
 import { GK_ATTR_FULL, GK_ATTR_LABELS, OUTFIELD_ATTR_LABELS, isGKAttributes } from "@/lib/game/attributes";
+import { FcPlayerCard } from "@/components/fc-player-card";
 import type { PlayerState } from "@/lib/game/types";
 
 function attrColor(v: number): string {
@@ -42,7 +43,7 @@ export function PlayerDetailBody({ player }: { player: PlayerState }) {
 
       <div>
         <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 mb-2">
-          {isGKAttributes(player.attributes) ? "Goalkeeper attributes" : "Attributes"}
+          {isGKAttributes(player.attributes) ? "Goalkeeper face stats" : "Face stats"}
         </p>
         <div className="space-y-2">
           {(isGKAttributes(player.attributes)
@@ -69,6 +70,8 @@ export function PlayerDetailBody({ player }: { player: PlayerState }) {
           ))}
         </div>
       </div>
+
+      <FcPlayerCard player={player} />
 
       <div className="grid grid-cols-2 gap-2">
         <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-2.5">

@@ -136,6 +136,7 @@ export function HalftimeMenu({ ht }: { ht: HalftimePayload }) {
       name: p.name,
       eff: p.ovr,
       affinity: positionAffinity(p.position as PositionCode, slot),
+      naturalPos: p.position,
       stamina: p.staminaNow,
       isCaptain: game?.tactics.setPieces.captain === p.id,
       yellow: p.yellow,

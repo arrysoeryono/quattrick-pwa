@@ -26,6 +26,7 @@ import {
 import { computeMarketValue, computeSalary, mulberry32 } from "./defaultData";
 import { attrValue, computeOverall, migratePlayerAttributes } from "./attributes";
 import { autoPickLineup } from "./tactics";
+import { buildFcProfile } from "./fc";
 import { defaultTactics, migrateTactics } from "./tacticPresets";
 import {
   ACHIEVEMENTS,
@@ -768,6 +769,7 @@ export function buildUserMatchTeam(game: GameState, team: TeamRow) {
       age: p.age,
       instr: game.tactics.instructions?.[String(i)] ?? {},
       playStyles: [...computePlayStyles(p).map((s) => s.id), ...drillStyle(p.id)],
+      fc: buildFcProfile(p),
     };
   });
   const formationObj = getFormation(game.tactics.formationName);
@@ -788,6 +790,7 @@ export function buildUserMatchTeam(game: GameState, team: TeamRow) {
         attributes: c.attributes, stamina: c.stamina, sharpness: c.sharpness, morale: c.morale, age: c.age,
         instr: game.tactics.instructions?.[String(i)] ?? {},
         playStyles: [...computePlayStyles(c).map((s) => s.id), ...drillStyle(c.id)],
+        fc: buildFcProfile(c),
       };
     }
   }
@@ -807,6 +810,7 @@ export function buildUserMatchTeam(game: GameState, team: TeamRow) {
       morale: p.morale,
       age: p.age,
       playStyles: [...computePlayStyles(p).map((s) => s.id)],
+      fc: buildFcProfile(p),
     }));
   return {
     id: game.clubId,

@@ -4,6 +4,7 @@ import { getFormation, positionAffinity } from "./formations";
 import type { MatchTeamConfig, Mentality, PlayerState, PositionCode } from "./types";
 import { aiSlidersFor } from "./tacticPresets";
 import { computePlayStyles } from "./development";
+import { buildFcProfile } from "./fc";
 
 /** Double round-robin (circle method). Returns 2*(n-1) rounds, weekly dates. */
 export function generateFixtures(teamIds: number[], seasonStart: Date): Fixture[] {
@@ -186,6 +187,7 @@ export function buildAiTeamConfig(dataset: Dataset, team: TeamRow, formationName
       morale: 60,
       age: pick.age,
       playStyles: computePlayStyles(pick).map((s) => s.id),
+      fc: buildFcProfile(pick),
     });
   });
   return {

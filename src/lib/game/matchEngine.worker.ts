@@ -337,7 +337,16 @@ function fill(tpl: string, p: SimPlayer): string {
 /* ---------- shot resolution ---------- */
 function resolveShot(att: TeamSim, def: TeamSim, shooter: SimPlayer, dist: number, angleDeg: number, pressure: number, xgMult = 1): void {
   const angleFactor = Math.sin((angleDeg * Math.PI) / 180);
-  const finishBonus = (1 + (attrValue(shooter.attributes, "shooting", 25) - 70) / 160) * att.mods.finish * (shooter.playStyles.has("clinical") || shooter.playStyles.has("drill-finish") ? 1.06 : 1);
+  // v4.9 FC mechanics: long-range efforts lean on the Long Shots in-game stat
+  let shooting = attrValue(shooter.attributes, "shooting", 25);
+  const fcStats = shooter.fc?.stats;
+  if (dist >= 16 && fcStats && typeof fcStats.longShots === "number") {
+    shooting = shooting * 0.6 + fcStats.longShots * 0.4;
+  }
+  const finishBonus = (1 + (shooting - 70) / 160) * att.mods.finish
+    * (shooter.playStyles.has("clinical") || shooter.playStyles.has("drill-finish") ? 1.06 : 1)
+    // Weak Foot star rating: a 2-star or worse weak foot slightly dulls finishing
+    * ((shooter.fc?.weakFoot ?? 5) <= 2 ? 0.97 : 1);
   const xg = Math.max(0.015, Math.min(0.72, 1.15 * Math.exp(-dist / 9.2) * (0.35 + 0.65 * angleFactor) * pressure * finishBonus * xgMult));
   // keeper quality shapes how much of that xG actually turns into goals
   const gk = onPitch(def).find((p) => p.slot === "GK");
@@ -420,7 +429,9 @@ function simulateMinute(): void {
       if (taker) {
         taker.shots++; att.shots++;
         events.push({ minute, type: "info", teamSide: att.side, text: `PENALTY to ${att.cfg.shortName}! ${taker.name} places the ball on the spot...` });
-        resolveShot(att, def, taker, 9, 24, 1, 1.55);
+        // v4.9 FC mechanics: the Penalties in-game stat shapes conversion
+        const penMult = taker.fc?.stats && typeof taker.fc.stats.penalties === "number" ? 0.9 + taker.fc.stats.penalties / 500 : 1;
+        resolveShot(att, def, taker, 9, 24, 1, 1.55 * penMult);
       }
     } else {
       const shooter = pickWeighted(onPitch(att), (p) => {

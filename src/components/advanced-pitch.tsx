@@ -19,6 +19,8 @@ export interface PitchChipPlayer {
   /** value shown inside the circle (effective rating, or slot code when empty) */
   eff: number;
   affinity: number;
+  /** the player's natural position — shown on the chip (CM›LB when moved) */
+  naturalPos?: string;
   sharpness?: number; // 0-100 training sharpness
   stamina?: number; // 0-100 current condition (live at half-time)
   injured?: boolean;
@@ -50,6 +52,13 @@ export function affinityRing(a: number): string {
 
 function barTone(v: number): string {
   return v >= 75 ? "bg-emerald-400" : v >= 50 ? "bg-amber-400" : "bg-rose-400";
+}
+
+function posBadgeTone(a: number): string {
+  if (a >= 0.95) return "text-emerald-300";
+  if (a >= 0.8) return "text-emerald-400/90";
+  if (a >= 0.65) return "text-amber-300";
+  return "text-rose-300";
 }
 
 export function AdvancedPitch({
@@ -184,8 +193,13 @@ export function AdvancedPitch({
               )}
             </span>
             {!empty && (
-              <span className="max-w-[68px] truncate rounded bg-slate-950/80 px-1 text-[9px] font-semibold text-slate-300">
-                {p.name.split(" ").pop()}
+              <span className="flex max-w-[84px] items-center justify-center gap-1 rounded bg-slate-950/80 px-1">
+                <span className={cn("text-[8px] font-black leading-tight", posBadgeTone(p.affinity))} title={p.naturalPos && p.naturalPos !== p.slotCode ? `Natural ${p.naturalPos}, playing ${p.slotCode}` : `Playing ${p.slotCode}`}>
+                  {p.naturalPos && p.naturalPos !== p.slotCode ? `${p.naturalPos}›${p.slotCode}` : p.slotCode}
+                </span>
+                <span className="truncate text-[9px] font-semibold leading-tight text-slate-300">
+                  {p.name.split(" ").pop()}
+                </span>
               </span>
             )}
             {empty && <span className="rounded bg-slate-950/60 px-1 text-[8px] text-slate-500">Empty</span>}
