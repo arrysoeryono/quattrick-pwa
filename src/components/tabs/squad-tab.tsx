@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAppStore } from "@/lib/store/gameStore";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -12,7 +12,7 @@ import { TacticsTab } from "@/components/tabs/tactics-tab";
 import { cn } from "@/lib/utils";
 import { posBadgeClass, ratingColor, formatMoney } from "@/lib/format";
 import { ALL_POSITIONS, type TrainingFocus } from "@/lib/game/types";
-import { Cross, Filter, HeartPulse, ListChecks, Search, Settings2, Users, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, Cross, Filter, HeartPulse, ListChecks, Search, Settings2, Users, X } from "lucide-react";
 
 type GroupFilter = "ALL" | "GK" | "DEF" | "MID" | "ATT";
 type SortKey = "ovr" | "pot" | "age" | "form" | "value" | "wage";
@@ -122,6 +122,50 @@ function SquadHub() {
     list.sort(sorters[sortKey]);
     return list;
   }, [game, filter, query, exactPos, minAge, maxAge, minOvr, minPot, sortKey, fitOnly]);
+
+  /* Quick player switching: stepper follows the currently filtered + sorted list. */
+  const selectedIndex = selectedId !== null ? squad.findIndex((p) => p.id === selectedId) : -1;
+  const canStep = squad.length > 1 && selectedIndex !== -1;
+  const sheetScrollRef = useRef<HTMLDivElement | null>(null);
+  const step = useCallback(
+    (delta: number) => {
+      if (!canStep) return;
+      const next = squad[(selectedIndex + delta + squad.length) % squad.length];
+      setSelectedId(next.id);
+      sheetScrollRef.current?.scrollTo({ top: 0 });
+    },
+    [canStep, squad, selectedIndex],
+  );
+
+  useEffect(() => {
+    if (!canStep) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "ArrowRight") {
+        e.preventDefault();
+        step(1);
+      } else if (e.key === "ArrowLeft") {
+        e.preventDefault();
+        step(-1);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [canStep, step]);
+
+  const touchStart = useRef<{ x: number; y: number } | null>(null);
+  const onTouchStart = (e: React.TouchEvent) => {
+    const t = e.touches[0];
+    touchStart.current = { x: t.clientX, y: t.clientY };
+  };
+  const onTouchEnd = (e: React.TouchEvent) => {
+    const start = touchStart.current;
+    touchStart.current = null;
+    if (!start) return;
+    const t = e.changedTouches[0];
+    const dx = t.clientX - start.x;
+    const dy = t.clientY - start.y;
+    if (Math.abs(dx) > 64 && Math.abs(dx) > Math.abs(dy) * 1.5) step(dx < 0 ? 1 : -1);
+  };
 
   const activeFilterCount = (exactPos !== "ALL" ? 1 : 0) + (minAge > 15 || maxAge < 45 ? 1 : 0) + (minOvr > 0 ? 1 : 0) + (minPot > 0 ? 1 : 0) + (fitOnly ? 1 : 0) + (sortKey !== "ovr" ? 1 : 0);
 
@@ -302,10 +346,43 @@ function SquadHub() {
       </div>
 
       <Sheet open={selected !== null} onOpenChange={(o) => !o && setSelectedId(null)}>
-        <SheetContent side="bottom" className="max-h-[min(88dvh,88vh)] overflow-y-auto overscroll-contain scrollbar-thin touch-scroll rounded-t-2xl border-slate-800 bg-slate-900 p-0">
+        <SheetContent
+          side="bottom"
+          className="max-h-[min(88dvh,88vh)] overflow-y-auto overscroll-contain scrollbar-thin touch-scroll rounded-t-2xl border-slate-800 bg-slate-900 p-0"
+          ref={sheetScrollRef}
+          onTouchStart={canStep ? onTouchStart : undefined}
+          onTouchEnd={canStep ? onTouchEnd : undefined}
+        >
           {selected && (
             <>
-              <SheetHeader className="px-4 pt-4 pb-2 border-b border-slate-800">
+              <SheetHeader className="px-4 pt-3 pb-2 border-b border-slate-800">
+                {canStep && (
+                  <div role="group" aria-label="Player navigation" className="mb-2 flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => step(-1)}
+                      aria-label={`Previous player (${squad[(selectedIndex - 1 + squad.length) % squad.length].name})`}
+                      className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-slate-800 bg-slate-950/60 text-slate-300 transition-colors hover:border-slate-600 hover:text-slate-100 active:bg-slate-800"
+                    >
+                      <ChevronLeft className="h-5 w-5" aria-hidden />
+                    </button>
+                    <div className="flex min-w-0 flex-1 flex-col items-center justify-center rounded-lg border border-slate-800 bg-slate-950/40 px-2 py-1">
+                      <p className="text-[9px] font-bold uppercase tracking-wider text-slate-500">Browse squad</p>
+                      <p className="text-xs font-black tabular-nums text-slate-200">
+                        {selectedIndex + 1} / {squad.length}
+                      </p>
+                      <p className="hidden text-[9px] text-slate-600 sm:block">Swipe or use ← → keys</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => step(1)}
+                      aria-label={`Next player (${squad[(selectedIndex + 1) % squad.length].name})`}
+                      className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-slate-800 bg-slate-950/60 text-slate-300 transition-colors hover:border-slate-600 hover:text-slate-100 active:bg-slate-800"
+                    >
+                      <ChevronRight className="h-5 w-5" aria-hidden />
+                    </button>
+                  </div>
+                )}
                 <div className="flex items-center gap-2">
                   <Badge variant="outline" className={cn("text-[10px] font-bold", posBadgeClass(selected.position))}>
                     {selected.position}
