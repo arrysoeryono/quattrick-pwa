@@ -5,6 +5,7 @@ import type { MatchTeamConfig, Mentality, PlayerState, PositionCode } from "./ty
 import { aiSlidersFor } from "./tacticPresets";
 import { computePlayStyles } from "./development";
 import { buildFcProfile } from "./fc";
+import { bestRoleForPlayer, defaultRoleForSlot } from "./fcIq";
 
 /** Double round-robin (circle method). Returns 2*(n-1) rounds, weekly dates. */
 export function generateFixtures(teamIds: number[], seasonStart: Date): Fixture[] {
@@ -172,6 +173,7 @@ export function buildAiTeamConfig(dataset: Dataset, team: TeamRow, formationName
         id: -1, name: "Unknown", position: slot as PositionCode, ovr: 50,
         attributes: fallbackAttrs,
         stamina: 100, sharpness: 70, morale: 60, age: 24,
+        role: defaultRoleForSlot(slot as PositionCode),
       });
       return;
     }
@@ -186,6 +188,7 @@ export function buildAiTeamConfig(dataset: Dataset, team: TeamRow, formationName
       sharpness: 70,
       morale: 60,
       age: pick.age,
+      role: bestRoleForPlayer(pick, slot as PositionCode),
       playStyles: computePlayStyles(pick).map((s) => s.id),
       fc: buildFcProfile(pick),
     });

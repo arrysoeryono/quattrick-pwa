@@ -21,6 +21,8 @@ export interface PitchChipPlayer {
   affinity: number;
   /** the player's natural position — shown on the chip (CM›LB when moved) */
   naturalPos?: string;
+  /** v5.0 FC IQ — short code of the assigned role (B2B, IF, AWB...) */
+  roleCode?: string;
   sharpness?: number; // 0-100 training sharpness
   stamina?: number; // 0-100 current condition (live at half-time)
   injured?: boolean;
@@ -193,10 +195,15 @@ export function AdvancedPitch({
               )}
             </span>
             {!empty && (
-              <span className="flex max-w-[84px] items-center justify-center gap-1 rounded bg-slate-950/80 px-1">
+              <span className="flex max-w-[92px] items-center justify-center gap-1 rounded bg-slate-950/80 px-1">
                 <span className={cn("text-[8px] font-black leading-tight", posBadgeTone(p.affinity))} title={p.naturalPos && p.naturalPos !== p.slotCode ? `Natural ${p.naturalPos}, playing ${p.slotCode}` : `Playing ${p.slotCode}`}>
                   {p.naturalPos && p.naturalPos !== p.slotCode ? `${p.naturalPos}›${p.slotCode}` : p.slotCode}
                 </span>
+                {p.roleCode && (
+                  <span className="rounded bg-emerald-500/15 px-0.5 text-[7px] font-black uppercase leading-tight text-emerald-300" title={`FC IQ role: ${p.roleCode}`}>
+                    {p.roleCode}
+                  </span>
+                )}
                 <span className="truncate text-[9px] font-semibold leading-tight text-slate-300">
                   {p.name.split(" ").pop()}
                 </span>

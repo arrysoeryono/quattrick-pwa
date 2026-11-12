@@ -220,6 +220,12 @@ export interface PlayerInstruction {
   def?: string; // defensive-phase instruction id
 }
 
+/** v5.0 FC IQ — the Player Role + Focus assigned to one lineup slot. */
+export interface SlotRole {
+  roleId: string;
+  focusId: string;
+}
+
 export interface SetPieceAssignments {
   captain: number | null;
   penalty: number | null;
@@ -237,6 +243,7 @@ export interface TacticPreset {
   gamePlan: string;
   sliders: TacticSliders;
   lineup: (number | null)[]; // aligned to the preset's formation slots
+  roles?: Record<string, SlotRole>; // v5.0 FC IQ role+focus per slot index
 }
 
 /** v4.7 — team-level weekly training balance.
@@ -262,6 +269,8 @@ export interface Tactics {
   sliders: TacticSliders;
   /** keyed by lineup slot index (0-10) */
   instructions: Record<string, PlayerInstruction>;
+  /** v5.0 FC IQ — keyed by lineup slot index (0-10) */
+  roles: Record<string, SlotRole>;
   setPieces: SetPieceAssignments;
 }
 
@@ -435,6 +444,7 @@ export interface MatchPlayerConfig {
   morale: number;
   age: number;
   instr?: PlayerInstruction;
+  role?: SlotRole; // v5.0 FC IQ role + focus for the engine
   playStyles?: string[]; // playstyle ids active in the engine
   fc?: MatchPlayerFc; // v4.9 derived FC profile
 }
@@ -468,6 +478,7 @@ export interface HalftimePlayer {
   yellow: number;
   sentOff: boolean;
   subbedOut: boolean;
+  role?: SlotRole | null; // v5.0 FC IQ role for the half-time pitch
 }
 
 /** v4.8 — payload posted by the match worker when it pauses at the break. */

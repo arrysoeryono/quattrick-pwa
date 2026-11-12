@@ -330,11 +330,12 @@ export const FC_ROLES: FcRoleDef[] = [
   { id: "box-to-box", name: "Box-to-Box", positions: ["CM"], attrs: ["staminaAttr", "shortPassing", "strength"] },
   { id: "playmaker", name: "Playmaker", positions: ["CM", "CAM"], attrs: ["vision", "shortPassing", "longPassing"] },
   { id: "shadow-striker", name: "Shadow Striker", positions: ["CAM", "LAM", "RAM", "LF", "RF"], attrs: ["finishing", "attackingPositioning", "dribbling"] },
-  { id: "half-winger", name: "Half-Winger", positions: ["CAM", "LM", "RM"], attrs: ["staminaAttr", "vision", "defAwareness"] },
+  { id: "half-winger", name: "Half-Winger", positions: ["CM", "CAM", "LM", "RM"], attrs: ["staminaAttr", "vision", "defAwareness"] },
   // Wide
   { id: "winger", name: "Winger", positions: ["LW", "RW", "LM", "RM", "LAM", "RAM", "LF", "RF"], attrs: ["sprintSpeed", "acceleration", "crossing"] },
   { id: "inside-forward", name: "Inside Forward", positions: ["LW", "RW", "LF", "RF"], attrs: ["finishing", "dribbling", "acceleration"] },
   { id: "wide-playmaker", name: "Wide Playmaker", positions: ["LW", "RW", "LM", "RM", "LAM", "RAM"], attrs: ["vision", "crossing", "shortPassing"] },
+  { id: "wide-midfielder", name: "Wide Midfielder", positions: ["LM", "RM"], attrs: ["staminaAttr", "defAwareness", "crossing"] },
   // Strikers
   { id: "advanced-forward", name: "Advanced Forward", positions: ["ST", "CF"], attrs: ["finishing", "attackingPositioning", "sprintSpeed"] },
   { id: "poacher", name: "Poacher", positions: ["ST"], attrs: ["finishing", "attackingPositioning", "volleys"] },

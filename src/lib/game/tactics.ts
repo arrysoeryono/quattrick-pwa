@@ -9,17 +9,23 @@ import type { PlayerState, PositionCode } from "./types";
  * need score), so rotation never drags a striker into defence or a centre-back
  * out to the wing. Only when a code lacks naturals do adjacent roles (best
  * affinity × overall + need) fill the gap.
+ *
+ * v5.0 — `opts.minAffinity` constrains phase 2: candidates below that affinity
+ * are never considered (used by rotation so backups stay position-faithful).
+ * A final relaxed pass fills any remaining hole rather than fielding 10 men.
  */
 function assignPositions(
   squad: PlayerState[],
   formationName: string,
   needScore: (p: PlayerState) => number,
+  opts?: { minAffinity?: number },
 ): (number | null)[] {
   const formation = getFormation(formationName);
+  const minAff = opts?.minAffinity ?? 0.15;
   const fit = squad.filter((p) => p.injuryWeeks === 0);
   const pool = fit.length >= 11 ? fit : squad; // tiny squad: allow crocks as last resort
 
-  const run = (candidates: PlayerState[]): (number | null)[] => {
+  const run = (candidates: PlayerState[], minAffinity: number): (number | null)[] => {
     const used = new Set<number>();
     const lineup: (number | null)[] = new Array(formation.positions.length).fill(null);
 
@@ -55,7 +61,9 @@ function assignPositions(
       let best: { p: PlayerState; s: number } | null = null;
       for (const p of candidates) {
         if (used.has(p.id)) continue;
-        const s = p.overallRating * positionAffinity(p.position, slot) + needScore(p);
+        const aff = positionAffinity(p.position, slot);
+        if (aff < minAffinity) continue;
+        const s = p.overallRating * aff + needScore(p);
         if (!best || s > best.s) best = { p, s };
       }
       if (best && best.s > -50) {
@@ -66,10 +74,16 @@ function assignPositions(
     return lineup;
   };
 
-  let lineup = run(pool);
+  let lineup = run(pool, minAff);
   // tiny squad fallback: allow injured players when nothing else fills the XI
   if (lineup.some((id) => id === null) && pool.length < squad.length) {
-    const filled = run(squad);
+    const filled = run(squad, minAff);
+    lineup = lineup.map((id, i) => (id === null ? filled[i] : id));
+  }
+  // strict rotation must never field 10 men — relaxed pass for any last hole
+  // (0.2 still blocks outfield-in-goal, the 0.15 GK↔outfield pairing)
+  if (lineup.some((id) => id === null) && minAff > 0.2) {
+    const filled = run(pool, 0.2);
     lineup = lineup.map((id, i) => (id === null ? filled[i] : id));
   }
   return lineup;
@@ -92,6 +106,10 @@ export function autoPickLineup(squad: PlayerState[], formationName: string): (nu
  * anyone out of their natural position. For each slot code the naturals who
  * most need minutes (few apps, low sharpness) step in; fatigued players are
  * held back; only codes without naturals reach for adjacent roles.
+ *
+ * v5.0 — strictly position-aware: phase 2 candidates must be at least
+ * "Competent" (affinity ≥ 0.8) for the slot, so rotation never fields a
+ * striker at centre-back. A relaxed fallback pass guarantees 11 names.
  */
 export function autoRotateLineup(squad: PlayerState[], formationName: string): (number | null)[] {
   const appsOf = (p: PlayerState) => p.seasonStats?.apps ?? 0;
@@ -106,7 +124,7 @@ export function autoRotateLineup(squad: PlayerState[], formationName: string): (
     const fatiguePenalty = p.stamina < 55 ? -9 : p.stamina < 70 ? -4 : 0;
     const injured = p.injuryWeeks > 0 ? -100 : 0;
     return rotationBoost + sharpnessNeed + fatiguePenalty + sharpAdj + injured + (p.morale - 60) * 0.05;
-  });
+  }, { minAffinity: 0.8 });
 }
 
 /** Effective displayed rating for a squad player in a slot (UI). */

@@ -12,6 +12,7 @@
 import { getFormation, positionAffinity } from "./formations";
 import { NEUTRAL_SLIDERS } from "./tacticPresets";
 import { attrValue, gkSaveFactor } from "./attributes";
+import { roleEffectFor, emptyRoleEffect, type RoleEffect, isValidRoleFor, defaultRoleForSlot } from "./fcIq";
 import type {
   HalftimePayload,
   MatchEventLog,
@@ -22,6 +23,8 @@ import type {
   MatchTeamConfig,
   Mentality,
   PositionCode,
+  ShotLogEntry,
+  SlotRole,
   TacticSliders,
 } from "./types";
 
@@ -59,6 +62,8 @@ interface SimPlayer {
   sentOff: boolean;
   subbedOut?: boolean; // replaced by a substitute — kept for match ratings
   instr: { att?: string; def?: string };
+  role: SlotRole | null; // v5.0 FC IQ role + focus
+  roleFx: RoleEffect; // precomputed engine effect of that role+focus
   playStyles: Set<string>;
 }
 
@@ -180,6 +185,14 @@ function computeMods(cfg: MatchTeamConfig): TeamMods {
   for (const p of cfg.players) {
     const att = p.instr?.att;
     const def = p.instr?.def;
+    // v5.0 FC IQ role + focus — team-level contributions
+    const fx = p.role ? roleEffectFor(p.role.roleId, p.role.focusId) : null;
+    if (fx) {
+      mods.width += fx.widthDelta ?? 0;
+      mods.press += fx.pressDelta ?? 0;
+      if (fx.faceXgMult !== undefined) mods.faceXg *= fx.faceXgMult;
+      if (fx.cardMult !== undefined) mods.card *= fx.cardMult;
+    }
     if (att === "stay-wide") mods.width += 6;
     if (att === "get-forward" || att === "overlap") {
       mods.att *= 1.015;
@@ -190,18 +203,34 @@ function computeMods(cfg: MatchTeamConfig): TeamMods {
       mods.att *= 0.99;
     }
     if (att === "deep-playmaker") mods.mid *= 1.015;
-    if (att === "false-9") {
+    if (att === "false-9" || att === "target-man") {
       mods.mid *= 1.01;
       mods.att *= 0.995;
     }
+    if (att === "stay-forward") mods.att *= 1.005;
+    if (att === "come-back") mods.def *= 1.008;
+    if (att === "mixed-runs") mods.att *= 1.008;
     if (def === "press-early") mods.press += 5;
     if (def === "hold-line") mods.def *= 1.015;
     if (def === "step-out") {
       mods.def *= 0.995;
       mods.press += 3;
     }
+    if (def === "cut-lanes") mods.press += 2;
+    if (def === "cover-center") mods.width -= 3;
     if (def === "cover-wing") mods.width -= 3;
+    if (def === "aggressive-int") {
+      mods.press += 5;
+      mods.card *= 1.06;
+      mods.staminaDrain += 0.008;
+    }
+    if (def === "conservative-int") {
+      mods.press = Math.max(-20, mods.press - 4);
+      mods.card *= 0.94;
+    }
     if (def === "sweeper-keeper") mods.faceXg *= 0.965;
+    if (def === "comes-crosses") mods.faceXg *= 0.985;
+    if (def === "cautious-crosses") mods.faceXg *= 1.008;
     if (def === "man-mark") mods.att *= 0.99; // opp attack — applied symmetrically below
   }
   return mods;
@@ -226,6 +255,8 @@ function toSimPlayer(p: MatchPlayerConfig, slot: string): SimPlayer {
     yellow: 0,
     sentOff: false,
     instr: p.instr ?? {},
+    role: p.role ?? null,
+    roleFx: p.role ? roleEffectFor(p.role.roleId, p.role.focusId) : emptyRoleEffect(),
     playStyles: new Set(p.playStyles ?? []),
   };
 }
@@ -277,18 +308,26 @@ function teamPower(t: TeamSim, zone: "att" | "mid" | "def"): number {
 
     if (zone === "att") {
       let weight = isAtt(p.slot) ? 1.3 : isDef(p.slot) ? 0.15 : 0.45;
-      if (p.instr.att === "get-forward" || p.instr.att === "overlap") weight += 0.25;
+      if (p.instr.att === "get-forward" || p.instr.att === "overlap" || p.instr.att === "mixed-runs") weight += 0.25;
       if (p.instr.att === "stay-back") weight *= 0.3;
+      if (p.instr.att === "stay-forward") weight += 0.1;
+      if (p.instr.att === "come-back") weight *= 0.75;
+      // v5.0 FC IQ role+focus movement profile
+      weight += p.roleFx.attJoin ?? 0;
+      if (p.roleFx.attMult !== undefined) weight *= p.roleFx.attMult;
       weight *= 1 + mods.width / 400 * (["LW", "RW", "LM", "RM", "LWB", "RWB"].includes(p.slot) ? 2 : -0.4);
       sum += eff * weight; w += weight;
     } else if (zone === "mid") {
       let weight = p.slot === "GK" ? 0.05 : isDef(p.slot) ? 0.55 : isAtt(p.slot) ? 0.5 : 1.4;
-      if (p.instr.att === "deep-playmaker" || p.instr.att === "free-roam") weight += 0.2;
+      if (p.instr.att === "deep-playmaker" || p.instr.att === "free-roam" || p.instr.att === "false-9" || p.instr.att === "target-man") weight += 0.2;
+      weight += p.roleFx.midJoin ?? 0;
       sum += eff * weight; w += weight;
     } else {
       let weight = p.slot === "GK" ? 3.2 : isDef(p.slot) ? 1.35 : isAtt(p.slot) ? 0.12 : 0.5;
       if (p.instr.att === "stay-back") weight += 0.2;
+      if (p.instr.att === "come-back") weight += 0.15;
       if (p.instr.def === "hold-line") weight += 0.1;
+      weight += p.roleFx.defJoin ?? 0;
       sum += eff * weight; w += weight;
     }
   }
@@ -346,7 +385,9 @@ function resolveShot(att: TeamSim, def: TeamSim, shooter: SimPlayer, dist: numbe
   const finishBonus = (1 + (shooting - 70) / 160) * att.mods.finish
     * (shooter.playStyles.has("clinical") || shooter.playStyles.has("drill-finish") ? 1.06 : 1)
     // Weak Foot star rating: a 2-star or worse weak foot slightly dulls finishing
-    * ((shooter.fc?.weakFoot ?? 5) <= 2 ? 0.97 : 1);
+    * ((shooter.fc?.weakFoot ?? 5) <= 2 ? 0.97 : 1)
+    // v5.0 FC IQ: Inside Forward / Advanced Forward focus adds a finishing edge
+    * (shooter.roleFx.finishMult ?? 1);
   const xg = Math.max(0.015, Math.min(0.72, 1.15 * Math.exp(-dist / 9.2) * (0.35 + 0.65 * angleFactor) * pressure * finishBonus * xgMult));
   // keeper quality shapes how much of that xG actually turns into goals
   const gk = onPitch(def).find((p) => p.slot === "GK");
@@ -363,6 +404,8 @@ function resolveShot(att: TeamSim, def: TeamSim, shooter: SimPlayer, dist: numbe
       let w = Math.pow(Math.max(1, attrValue(p.attributes, "passing", attrValue(p.attributes, "kicking", 40)) * 0.7 + p.ovr * 0.3), 2);
       if (p.playStyles.has("playmaker")) w *= 1.25;
       if (p.instr.att === "false-9" || p.instr.att === "free-roam") w *= 1.2;
+      // v5.0 FC IQ creators: playmakers and false 9s set goals up more often
+      w *= p.roleFx.assistMult ?? 1;
       return w;
     });
     if (assister && rng() < 0.68) {
@@ -402,6 +445,8 @@ function simulateMinute(): void {
     for (const p of t.players) {
       if (p.sentOff || p.subbedOut) continue;
       let drain = 0.34 + (100 - p.staminaAttr) / 100 * 0.38 + t.mods.staminaDrain + (t.mentality === "attacking" ? 0.05 : 0);
+      // v5.0 FC IQ: high-motor roles (box-to-box, attacking wingback...) burn extra fuel
+      drain += p.roleFx.drainAdd ?? 0;
       if (p.playStyles.has("engine")) drain *= 0.88;
       else if (p.playStyles.has("rapid")) drain *= 0.93;
       else if (p.playStyles.has("drill-press")) drain *= 0.93;
@@ -443,7 +488,10 @@ function simulateMinute(): void {
         if (ia === "stay-wide") w *= 1.15;
         if (ia === "come-short") w *= 0.85;
         if (ia === "false-9") w *= 0.8;
+        if (ia === "box-cross") w *= 1.15;
         if (p.playStyles.has("maestro")) w *= 1.1;
+        // v5.0 FC IQ: poachers & target men live in the box; deep roles shoot less
+        w *= p.roleFx.boxMult ?? 1;
         return w;
       });
       if (shooter) {
@@ -587,6 +635,7 @@ function halftimePayload(): HalftimePayload {
       yellow: p.yellow,
       sentOff: p.sentOff,
       subbedOut: Boolean(p.subbedOut),
+      role: p.role, // v5.0 FC IQ
     })),
     benchIds: t.bench.map((b) => b.id),
   };
@@ -703,6 +752,12 @@ function applySub(outId: number, inId: number): void {
   const bIdx = t.bench.findIndex((b) => b.id === inId);
   if (!outP || bIdx < 0) return;
   const inCfg = t.bench.splice(bIdx, 1)[0];
+  // v5.0 — when the bench role is illegal for the slot he steps into, fall
+  // back to a sensible default for that slot
+  const slotPos = outP.slot as PositionCode;
+  if (inCfg.role && !isValidRoleFor(slotPos, inCfg.role)) {
+    inCfg.role = defaultRoleForSlot(slotPos);
+  }
   const sim = toSimPlayer(inCfg, outP.slot);
   outP.subbedOut = true;
   t.players.push(sim);

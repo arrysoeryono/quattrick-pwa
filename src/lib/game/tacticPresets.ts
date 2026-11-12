@@ -126,25 +126,38 @@ export const ATTACK_INSTRUCTIONS: InstructionOption[] = [
   { id: "get-in-behind", name: "Get in behind", desc: "Constantly runs the channels toward goal.", groups: ["ATT"] },
   { id: "come-short", name: "Come short", desc: "Drops toward the ball to link play.", groups: ["ATT"] },
   { id: "false-9", name: "False 9", desc: "Drifts into midfield, dragging markers away.", groups: ["ATT"] },
+  { id: "target-man", name: "Target man", desc: "Holds the ball up centrally and wins aerial duels.", groups: ["ATT"] },
+  { id: "stay-forward", name: "Stay forward", desc: "Rarely tracks back — stays upfield for counters.", groups: ["ATT"] },
+  { id: "come-back", name: "Come back on defence", desc: "Drops deep to help the team out of possession.", groups: ["MID", "ATT"] },
   { id: "stay-wide", name: "Stay wide", desc: "Hugs the touchline to stretch the block.", groups: ["ATT", "MID"] },
   { id: "cut-inside", name: "Cut inside", desc: "Inverts toward the box onto the stronger foot.", groups: ["ATT", "MID"] },
-  { id: "get-forward", name: "Get forward", desc: "Joins attacks whenever possession is secured.", groups: ["MID", "DEF"] },
+  { id: "box-cross", name: "Get into the box for cross", desc: "Attacks the six-yard box whenever a cross is coming.", groups: ["ATT", "MID"] },
+  { id: "edge-box", name: "Stay on edge of box for cross", desc: "Waits at the top of the box for clearances and volleys.", groups: ["ATT", "MID"] },
+  { id: "stick-position", name: "Stick to position", desc: "Keeps the shape disciplined instead of chasing space.", groups: ["MID", "ATT"] },
   { id: "free-roam", name: "Free roam", desc: "Wanders off the line to find space.", groups: ["MID", "ATT"] },
+  { id: "get-forward", name: "Get forward", desc: "Joins attacks whenever possession is secured.", groups: ["MID", "DEF"] },
   { id: "deep-playmaker", name: "Deep-lying playmaker", desc: "Drops between the centre-backs to dictate.", groups: ["MID", "DEF"] },
   { id: "stay-back", name: "Stay back while attacking", desc: "Rarely crosses halfway in possession.", groups: ["DEF"] },
   { id: "overlap", name: "Overlap runs", desc: "Bursts around the winger's outside shoulder.", groups: ["DEF"] },
   { id: "inverted-wb", name: "Inverted wing-back", desc: "Tucks into midfield when attacking.", groups: ["DEF"] },
+  { id: "mixed-runs", name: "Mixed attack", desc: "Alternates overlapping and tucking in dynamically.", groups: ["DEF"] },
 ];
 
 export const DEFEND_INSTRUCTIONS: InstructionOption[] = [
   { id: "none", name: "Default", desc: "Standard defensive duties.", groups: ["GK", "DEF", "MID", "ATT"] },
   { id: "hold-line", name: "Hold the line", desc: "Never steps out of the back line.", groups: ["DEF", "MID"] },
-  { id: "step-out", name: "Step out", desc: "Engages the ball-carrier early.", groups: ["DEF", "MID"] },
+  { id: "step-out", name: "Step up", desc: "Engages the ball-carrier early.", groups: ["DEF", "MID"] },
+  { id: "cut-lanes", name: "Cut passing lanes", desc: "Intercepts passes instead of chasing the carrier.", groups: ["DEF", "MID"] },
+  { id: "cover-center", name: "Cover centre", desc: "Collapses centrally to close the dangerous zone.", groups: ["DEF", "MID"] },
   { id: "cover-wing", name: "Cover the wing", desc: "Shifts wide to double up on wingers.", groups: ["DEF", "MID"] },
+  { id: "aggressive-int", name: "Aggressive interceptions", desc: "Jumps every pass early — burns stamina, wins ball.", groups: ["DEF", "MID"] },
+  { id: "conservative-int", name: "Conservative interceptions", desc: "Only steps in on near-certain wins. Saves energy.", groups: ["DEF", "MID"] },
   { id: "man-mark", name: "Man mark", desc: "Shadows the opponents' key creator.", groups: ["DEF", "MID"] },
   { id: "press-early", name: "Press early", desc: "Charges the receiver before they turn.", groups: ["MID", "ATT"] },
   { id: "contain", name: "Contain", desc: "Shepherds away from goal instead of diving in.", groups: ["DEF", "MID", "ATT"] },
   { id: "sweeper-keeper", name: "Sweeper keeper", desc: "Rushes behind the high line to kill through balls.", groups: ["GK"] },
+  { id: "comes-crosses", name: "Comes for crosses", desc: "Attacks crosses aggressively to claim or punch.", groups: ["GK"] },
+  { id: "cautious-crosses", name: "Cautious with crosses", desc: "Stays on the line and lets defenders head clear.", groups: ["GK"] },
   { id: "stay-on-line", name: "Stay on line", desc: "Guards the posts, rarely leaves the area.", groups: ["GK"] },
 ];
 
@@ -171,11 +184,12 @@ export function defaultTactics(formationName: string): Tactics {
     gamePlan: plan.id,
     sliders: { ...plan.sliders },
     instructions: {},
+    roles: {},
     setPieces: { captain: null, penalty: null, freeKick: null, cornerLeft: null, cornerRight: null },
   };
 }
 
-/** Upgrade a v3 tactics object in place to the full v4 shape. */
+/** Upgrade a v3 tactics object in place to the full v5 shape. */
 export function migrateTactics(raw: Partial<Tactics> | undefined, formationName: string): Tactics {
   const base = defaultTactics(formationName);
   if (!raw) return base;
@@ -185,6 +199,7 @@ export function migrateTactics(raw: Partial<Tactics> | undefined, formationName:
     gamePlan: raw.gamePlan ?? base.gamePlan,
     sliders: { ...base.sliders, ...(raw.sliders ?? {}) },
     instructions: raw.instructions ?? {},
+    roles: raw.roles ?? {},
     setPieces: { ...base.setPieces, ...(raw.setPieces ?? {}) },
   };
 }

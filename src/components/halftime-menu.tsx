@@ -16,6 +16,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Slider } from "@/components/ui/slider";
 import { AdvancedPitch, type PitchChipPlayer } from "@/components/advanced-pitch";
 import { SLIDER_META } from "@/lib/game/tacticPresets";
+import { ROLE_SHORT } from "@/lib/game/fcIq";
 import { formationCoordinates, getFormation, positionAffinity } from "@/lib/game/formations";
 import { ratingColor } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -137,6 +138,7 @@ export function HalftimeMenu({ ht }: { ht: HalftimePayload }) {
       eff: p.ovr,
       affinity: positionAffinity(p.position as PositionCode, slot),
       naturalPos: p.position,
+      roleCode: p.role ? ROLE_SHORT[p.role.roleId] : undefined,
       stamina: p.staminaNow,
       isCaptain: game?.tactics.setPieces.captain === p.id,
       yellow: p.yellow,

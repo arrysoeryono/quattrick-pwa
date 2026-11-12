@@ -27,6 +27,7 @@ import { computeMarketValue, computeSalary, mulberry32 } from "./defaultData";
 import { attrValue, computeOverall, migratePlayerAttributes } from "./attributes";
 import { autoPickLineup } from "./tactics";
 import { buildFcProfile } from "./fc";
+import { bestRoleForPlayer } from "./fcIq";
 import { defaultTactics, migrateTactics } from "./tacticPresets";
 import {
   ACHIEVEMENTS,
@@ -773,11 +774,22 @@ export function buildUserMatchTeam(game: GameState, team: TeamRow) {
     };
   });
   const formationObj = getFormation(game.tactics.formationName);
-  while (players.length < 11) players.push(null);
+  const roleFor = (p: PlayerState, slotIndex: number) => {
+    const saved = game.tactics.roles?.[String(slotIndex)];
+    if (saved) return saved;
+    const slot = formationObj.positions[slotIndex];
+    return slot ? bestRoleForPlayer(p, slot) : undefined;
+  };
+  const playersWithRoles = game.lineup.map((id, i) => {
+    const p = game.players.find((x) => x.id === id);
+    if (!p || !players[i]) return null;
+    return { ...players[i], role: roleFor(p, i) };
+  });
+  while (playersWithRoles.length < 11) playersWithRoles.push(null);
   // fill empty slots with best remaining squad players
   const used = new Set(game.lineup.filter(Boolean) as number[]);
   for (let i = 0; i < 11; i++) {
-    if (players[i]) continue;
+    if (playersWithRoles[i]) continue;
     const slot = formationObj.positions[i];
     const candidates = game.players
       .filter((p) => !used.has(p.id) && p.injuryWeeks === 0)
@@ -785,10 +797,11 @@ export function buildUserMatchTeam(game: GameState, team: TeamRow) {
     const c = candidates[0];
     if (c) {
       used.add(c.id);
-      players[i] = {
+      playersWithRoles[i] = {
         id: c.id, name: c.name, position: c.position, ovr: c.overallRating,
         attributes: c.attributes, stamina: c.stamina, sharpness: c.sharpness, morale: c.morale, age: c.age,
         instr: game.tactics.instructions?.[String(i)] ?? {},
+        role: bestRoleForPlayer(c, slot),
         playStyles: [...computePlayStyles(c).map((s) => s.id), ...drillStyle(c.id)],
         fc: buildFcProfile(c),
       };
@@ -809,6 +822,7 @@ export function buildUserMatchTeam(game: GameState, team: TeamRow) {
       sharpness: p.sharpness,
       morale: p.morale,
       age: p.age,
+      role: bestRoleForPlayer(p, p.position),
       playStyles: [...computePlayStyles(p).map((s) => s.id)],
       fc: buildFcProfile(p),
     }));
@@ -820,7 +834,7 @@ export function buildUserMatchTeam(game: GameState, team: TeamRow) {
     mentality: game.tactics.mentality,
     sliders: game.tactics.sliders,
     setPieces: game.tactics.setPieces,
-    players: players.filter(Boolean) as NonNullable<(typeof players)[number]>[],
+    players: playersWithRoles.filter(Boolean) as NonNullable<(typeof playersWithRoles)[number]>[],
     bench: benchPlayers,
   };
 }

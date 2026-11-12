@@ -11,10 +11,19 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { FORMATIONS, formationCoordinates, getFormation, positionAffinity, affinityLabel, positionGroup } from "@/lib/game/formations";
 import { autoPickLineup, autoRotateLineup, effectiveOvr, squadChemistry } from "@/lib/game/tactics";
 import { GAME_PLANS, SLIDER_META, ATTACK_INSTRUCTIONS, DEFEND_INSTRUCTIONS, instructionsForGroup } from "@/lib/game/tacticPresets";
+import {
+  FOCUS_DEFS,
+  ROLE_FOCUSES,
+  ROLE_SHORT,
+  bestRoleForPlayer,
+  roleBlurb,
+  rolesForSlot,
+} from "@/lib/game/fcIq";
+import { buildFcProfile } from "@/lib/game/fc";
 import { AdvancedPitch, affinityRing } from "@/components/advanced-pitch";
 import { cn } from "@/lib/utils";
 import { ClipboardList, Dumbbell, Repeat, Save, Sparkles, Trash2, Wand2 } from "lucide-react";
-import type { PlayerState, SetPieceAssignments } from "@/lib/game/types";
+import type { PlayerState, SetPieceAssignments, SlotRole } from "@/lib/game/types";
 
 const CATEGORY_TONE: Record<string, string> = {
   Balanced: "text-slate-300 border-slate-600",
@@ -81,8 +90,32 @@ export function TacticsTab() {
       .slice(0, 18);
   }, [selectedSlot, game, formation]);
 
+  const slotFcProfile = useMemo(() => {
+    if (selectedSlot === null || !game) return null;
+    const p = game.players.find((x) => x.id === game.lineup[selectedSlot]);
+    if (!p) return null;
+    return buildFcProfile(p);
+  }, [selectedSlot, game]);
+
   if (!game || !formation) return null;
   const t = game.tactics;
+
+  /** v5.0 FC IQ — give every filled slot a legal role (auto = best mastery). */
+  const syncRoles = (g: NonNullable<typeof game>) => {
+    g.tactics.roles ??= {};
+    formation.positions.forEach((slot, i) => {
+      const p = g.players.find((x) => x.id === g.lineup[i]);
+      if (!p) {
+        delete g.tactics.roles[String(i)];
+        return;
+      }
+      const cur = g.tactics.roles[String(i)];
+      const legal = rolesForSlot(slot);
+      const valid = cur && legal.some((r) => r.id === cur.roleId) &&
+        (ROLE_FOCUSES[cur.roleId] ?? []).includes(cur.focusId);
+      if (!valid) g.tactics.roles[String(i)] = bestRoleForPlayer(p, slot);
+    });
+  };
 
   const setFormation = (name: string) => {
     update((g) => {
@@ -105,6 +138,7 @@ export function TacticsTab() {
       g.lineup = g.lineup.map((id, i) => (id !== null ? id : auto[i]));
       // drop instructions for out-of-group slots
       g.tactics.instructions = {};
+      syncRoles(g);
     });
     setFormationDialog(false);
   };
@@ -121,6 +155,16 @@ export function TacticsTab() {
       g.lineup[slotIndex] = playerId;
       // clear stale instructions on that slot
       delete g.tactics.instructions[String(slotIndex)];
+      g.tactics.roles ??= {};
+      // v5.0 FC IQ — auto-assign the new player's best role for this slot
+      if (playerId !== null) {
+        const p = g.players.find((x) => x.id === playerId);
+        if (p) g.tactics.roles[String(slotIndex)] = bestRoleForPlayer(p, formation.positions[slotIndex]);
+      } else {
+        delete g.tactics.roles[String(slotIndex)];
+      }
+      // swapped-out player keeps a valid role in his new slot
+      syncRoles(g);
     });
     setSlotDialog(null);
   };
@@ -129,6 +173,7 @@ export function TacticsTab() {
     update((g) => {
       g.lineup = autoPickLineup(g.players, g.tactics.formationName);
       g.tactics.instructions = {};
+      syncRoles(g);
     });
   };
 
@@ -136,6 +181,19 @@ export function TacticsTab() {
     update((g) => {
       g.lineup = autoRotateLineup(g.players, g.tactics.formationName);
       g.tactics.instructions = {};
+      syncRoles(g);
+    });
+  };
+
+  const setSlotRole = (slotIndex: number, role: Partial<SlotRole>) => {
+    update((g) => {
+      g.tactics.roles ??= {};
+      const slot = formation.positions[slotIndex];
+      const cur = g.tactics.roles[String(slotIndex)] ?? bestRoleForPlayer(
+        g.players.find((x) => x.id === g.lineup[slotIndex]) ?? { id: 0, position: slot, attributes: { pace: 50, shooting: 50, passing: 50, dribbling: 50, defending: 50, physical: 50 } },
+        slot,
+      );
+      g.tactics.roles[String(slotIndex)] = { ...cur, ...role };
     });
   };
 
@@ -185,6 +243,7 @@ export function TacticsTab() {
         gamePlan: g.tactics.gamePlan,
         sliders: { ...g.tactics.sliders },
         lineup: [...g.lineup],
+        roles: { ...(g.tactics.roles ?? {}) },
       }];
     });
     setPresetName("");
@@ -200,12 +259,14 @@ export function TacticsTab() {
       g.tactics.gamePlan = preset.gamePlan;
       g.tactics.sliders = { ...preset.sliders };
       g.tactics.instructions = {};
+      g.tactics.roles = { ...(preset.roles ?? {}) };
       // restore the saved lineup, dropping players who left the club, then fill gaps
       const squadIds = new Set(g.players.map((p) => p.id));
       const valid = preset.lineup.map((pid) => (pid !== null && squadIds.has(pid) ? pid : null));
       while (valid.length < 11) valid.push(null);
       const auto = autoPickLineup(g.players, preset.formationName);
       g.lineup = valid.map((pid, i) => (pid !== null ? pid : auto[i]));
+      syncRoles(g);
     });
   };
 
@@ -288,6 +349,8 @@ export function TacticsTab() {
             const player = slotPlayer(i);
             if (!player) return null;
             const slot = formation.positions[i];
+            // saved role, or the player's best role as a display fallback
+            const roleId = (t.roles?.[String(i)] ?? bestRoleForPlayer(player, slot)).roleId;
             return {
               id: player.id,
               slotCode: slot,
@@ -295,6 +358,7 @@ export function TacticsTab() {
               eff: effectiveOvr(player, slot),
               affinity: positionAffinity(player.position, slot),
               naturalPos: player.position,
+              roleCode: roleId ? ROLE_SHORT[roleId] : undefined,
               sharpness: player.sharpness,
               stamina: player.stamina,
               injured: player.injuryWeeks > 0,
@@ -336,6 +400,7 @@ export function TacticsTab() {
           <span className="flex items-center gap-1"><span className="h-1.5 w-3 rounded-full bg-emerald-400" aria-hidden /> high</span>
           <span className="flex items-center gap-1"><span className="h-1.5 w-3 rounded-full bg-amber-400" aria-hidden /> medium</span>
           <span className="flex items-center gap-1"><span className="h-1.5 w-3 rounded-full bg-rose-400" aria-hidden /> low</span>
+          <span>position · FC IQ role · player</span>
           <span>top bar = sharpness · bottom bar = fitness</span>
           <span className="flex items-center gap-1"><span className="flex h-3 w-3 items-center justify-center rounded-full bg-amber-400 text-[7px] font-black text-slate-950">C</span> captain</span>
           <span className="flex items-center gap-1"><span className="h-1.5 w-1.5 rounded-full bg-amber-400" aria-hidden /> custom instruction</span>
@@ -427,7 +492,7 @@ export function TacticsTab() {
           ))}
         </div>
         <p className="text-[11px] text-slate-600 text-center">
-          Tap a chip to swap players and add per-player instructions. Use the repeat button for fair auto-rotation of low-minute players.
+          Tap a chip to swap players, choose their FC IQ role & focus, and add per-player instructions. The repeat button rotates low-minute players into position-faithful slots.
         </p>
       </section>
 
@@ -588,12 +653,15 @@ export function TacticsTab() {
                   {formation.positions[selectedSlot]}, slot {selectedSlot + 1}
                 </DialogTitle>
                 <DialogDescription>
-                  {slotPlayer(selectedSlot) ? slotPlayer(selectedSlot)!.name : "Empty slot"}, assign or set instructions
+                  {slotPlayer(selectedSlot) ? slotPlayer(selectedSlot)!.name : "Empty slot"} · assign, pick the FC IQ role + focus, or set instructions
                 </DialogDescription>
               </DialogHeader>
               <Tabs defaultValue="assign" className="px-4 pb-4">
                 <TabsList className="w-full bg-slate-950 border border-slate-800">
                   <TabsTrigger value="assign" className="flex-1 text-xs data-[state=active]:text-emerald-400">Assign</TabsTrigger>
+                  <TabsTrigger value="role" className="flex-1 text-xs data-[state=active]:text-emerald-400" disabled={!slotPlayer(selectedSlot)}>
+                    FC IQ Role
+                  </TabsTrigger>
                   <TabsTrigger value="instructions" className="flex-1 text-xs data-[state=active]:text-emerald-400" disabled={!slotPlayer(selectedSlot)}>
                     Instructions
                   </TabsTrigger>
@@ -643,6 +711,85 @@ export function TacticsTab() {
                       Leave empty
                     </Button>
                   </div>
+                </TabsContent>
+
+                <TabsContent value="role" className="mt-2 space-y-3">
+                  {slotPlayer(selectedSlot) && slotFcProfile && (() => {
+                    const slot = formation.positions[selectedSlot];
+                    const roleList = rolesForSlot(slot);
+                    const cur = t.roles?.[String(selectedSlot)] ?? bestRoleForPlayer(slotPlayer(selectedSlot)!, slot);
+                    const masteryOf = (roleId: string) => slotFcProfile.roles.find((r) => r.id === roleId)?.level ?? null;
+                    const masteryTone = (lvl: string | null) =>
+                      lvl === "++"
+                        ? "border-amber-400/60 text-amber-300"
+                        : lvl === "+"
+                          ? "border-emerald-500/50 text-emerald-400"
+                          : "border-slate-600 text-slate-400";
+                    const focuses = ROLE_FOCUSES[cur.roleId] ?? ["balanced"];
+                    const roleName = (id: string) => roleList.find((r) => r.id === id)?.name ?? id;
+                    return (
+                      <>
+                        <div className="max-h-[min(30dvh,30vh)] space-y-1.5 overflow-y-auto overscroll-contain pr-1 scrollbar-thin touch-scroll">
+                          {roleList.map((role) => {
+                            const lvl = masteryOf(role.id);
+                            const active = cur.roleId === role.id;
+                            return (
+                              <button
+                                key={role.id}
+                                type="button"
+                                onClick={() => setSlotRole(selectedSlot, { roleId: role.id, focusId: (ROLE_FOCUSES[role.id] ?? ["balanced"])[0] })}
+                                aria-pressed={active}
+                                aria-label={`Role ${role.name}`}
+                                className={cn(
+                                  "w-full flex items-center gap-2 rounded-lg border p-2.5 text-left transition-colors",
+                                  active ? "border-emerald-500/60 bg-emerald-500/10" : "border-slate-800 bg-slate-950/40 hover:border-slate-700",
+                                )}
+                              >
+                                <span className={cn(
+                                  "flex h-8 w-9 shrink-0 items-center justify-center rounded-md border text-[10px] font-black",
+                                  active ? "border-emerald-500/60 text-emerald-400" : "border-slate-700 text-slate-400",
+                                )}>
+                                  {ROLE_SHORT[role.id] ?? "--"}
+                                </span>
+                                <span className="min-w-0 flex-1">
+                                  <span className={cn("block text-sm font-semibold", active ? "text-emerald-400" : "text-slate-200")}>{role.name}</span>
+                                  <span className="block text-[10px] leading-tight text-slate-500">{roleBlurb(role.id)}</span>
+                                </span>
+                                <span className={cn("shrink-0 rounded border px-1.5 py-0.5 text-[9px] font-black", masteryTone(lvl))} title={lvl ? `Role mastery: ${lvl}` : "Not familiar with this role"}>
+                                  {lvl ?? "—"}
+                                </span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                        <div>
+                          <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500 mb-1">Focus · {roleName(cur.roleId)}</p>
+                          <div className="grid grid-cols-3 gap-1.5" role="group" aria-label="Role focus">
+                            {focuses.map((fid) => (
+                              <button
+                                key={fid}
+                                type="button"
+                                onClick={() => setSlotRole(selectedSlot, { focusId: fid })}
+                                aria-pressed={cur.focusId === fid}
+                                className={cn(
+                                  "min-h-[34px] rounded-lg border text-[11px] font-semibold capitalize transition-colors",
+                                  cur.focusId === fid
+                                    ? "border-emerald-500/60 bg-emerald-500/10 text-emerald-400"
+                                    : "border-slate-800 bg-slate-950/40 text-slate-400 hover:border-slate-700",
+                                )}
+                              >
+                                {FOCUS_DEFS[fid]?.name ?? fid}
+                              </button>
+                            ))}
+                          </div>
+                          <p className="text-[10px] text-slate-500 mt-1">{FOCUS_DEFS[cur.focusId]?.desc}</p>
+                        </div>
+                        <p className="text-[10px] text-slate-600">
+                          Mastery (++) comes from the player's in-game stats — the role shapes their movement in the match engine: attacking runs, defensive cover, stamina drain and pressing.
+                        </p>
+                      </>
+                    );
+                  })()}
                 </TabsContent>
 
                 <TabsContent value="instructions" className="mt-2 space-y-3">
