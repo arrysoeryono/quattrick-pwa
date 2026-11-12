@@ -61,3 +61,4 @@ download/
 .vercel
 # local uploads
 /upload/
+tool-results/
