@@ -6,9 +6,10 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { DatabaseManagerModal } from "@/components/database-manager-modal";
-import { Cloud, CloudOff, Database, Play, Trash2, Trophy, UserRound } from "lucide-react";
+import { Cloud, CloudOff, Database, Play, Sparkles, Trash2, Trophy, UserRound } from "lucide-react";
 import { formatDate } from "@/lib/format";
-import { DIFFICULTY_META, type Difficulty } from "@/lib/game/types";
+import { DIFFICULTY_META, type CareerMode, type Difficulty, type PositionCode } from "@/lib/game/types";
+import { PRO_POSITIONS } from "@/lib/game/playerCareer";
 import { cn } from "@/lib/utils";
 
 const CREST_COLORS = [
@@ -30,6 +31,9 @@ export function OnboardingScreen() {
   const cloudOnline = useAppStore((s) => s.cloudOnline);
 
   const [managerName, setManagerName] = useState("");
+  const [careerMode, setCareerMode] = useState<CareerMode>("manager");
+  const [proName, setProName] = useState("");
+  const [proPosition, setProPosition] = useState<PositionCode>("ST");
   const [selectedClub, setSelectedClub] = useState<number | null>(null);
   const [difficulty, setDifficulty] = useState<Difficulty>("pro");
   const [starting, setStarting] = useState(false);
@@ -41,12 +45,22 @@ export function OnboardingScreen() {
     return list;
   }, [dataset]);
 
-  const canStart = managerName.trim().length >= 2 && selectedClub !== null;
+  const canStart =
+    careerMode === "manager"
+      ? managerName.trim().length >= 2 && selectedClub !== null
+      : proName.trim().length >= 2 && selectedClub !== null;
 
   const handleStart = async () => {
     if (!canStart) return;
     setStarting(true);
-    await startCareer(managerName.trim(), selectedClub!, difficulty);
+    await startCareer(
+      careerMode === "manager" ? managerName.trim() : proName.trim(),
+      selectedClub!,
+      difficulty,
+      careerMode,
+      proName.trim(),
+      proPosition,
+    );
     setStarting(false);
   };
 
@@ -124,17 +138,92 @@ export function OnboardingScreen() {
             {/* new career */}
             <section aria-label="New career">
               <h2 className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-2">New career</h2>
-              <div className="relative">
-                <UserRound className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-500" aria-hidden />
-                <Input
-                  value={managerName}
-                  onChange={(e) => setManagerName(e.target.value)}
-                  placeholder="Manager name"
-                  maxLength={30}
-                  className="pl-9 bg-slate-950 border-slate-800"
-                  aria-label="Manager name"
-                />
+
+              {/* v6.0 career mode picker */}
+              <div className="grid grid-cols-2 gap-2 mb-3" role="group" aria-label="Career mode selection">
+                <button
+                  type="button"
+                  onClick={() => setCareerMode("manager")}
+                  aria-pressed={careerMode === "manager"}
+                  className={cn(
+                    "min-h-[64px] rounded-xl border p-3 text-left transition-colors",
+                    careerMode === "manager"
+                      ? "border-emerald-500/60 bg-emerald-500/10"
+                      : "border-slate-800 bg-slate-950/40 hover:border-slate-700",
+                  )}
+                >
+                  <Trophy className={cn("h-5 w-5", careerMode === "manager" ? "text-emerald-400" : "text-slate-500")} aria-hidden />
+                  <p className={cn("mt-1.5 text-xs font-bold", careerMode === "manager" ? "text-emerald-400" : "text-slate-300")}>Manager Career</p>
+                  <p className="text-[10px] text-slate-500 leading-tight">Run the club: tactics, transfers, board</p>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCareerMode("player")}
+                  aria-pressed={careerMode === "player"}
+                  className={cn(
+                    "min-h-[64px] rounded-xl border p-3 text-left transition-colors",
+                    careerMode === "player"
+                      ? "border-emerald-500/60 bg-emerald-500/10"
+                      : "border-slate-800 bg-slate-950/40 hover:border-slate-700",
+                  )}
+                >
+                  <Sparkles className={cn("h-5 w-5", careerMode === "player" ? "text-emerald-400" : "text-slate-500")} aria-hidden />
+                  <p className={cn("mt-1.5 text-xs font-bold", careerMode === "player" ? "text-emerald-400" : "text-slate-300")}>Player Career</p>
+                  <p className="text-[10px] text-slate-500 leading-tight">Be a Pro: grow a wonderkid to stardom</p>
+                </button>
               </div>
+
+              {careerMode === "manager" ? (
+                <div className="relative">
+                  <UserRound className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-500" aria-hidden />
+                  <Input
+                    value={managerName}
+                    onChange={(e) => setManagerName(e.target.value)}
+                    placeholder="Manager name"
+                    maxLength={30}
+                    className="pl-9 bg-slate-950 border-slate-800"
+                    aria-label="Manager name"
+                  />
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <div className="relative">
+                    <UserRound className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-500" aria-hidden />
+                    <Input
+                      value={proName}
+                      onChange={(e) => setProName(e.target.value)}
+                      placeholder="Your Pro name (17-year-old wonderkid)"
+                      maxLength={30}
+                      className="pl-9 bg-slate-950 border-slate-800"
+                      aria-label="Your Pro name"
+                    />
+                  </div>
+                  <div>
+                    <p className="text-[10px] text-slate-500 mb-1">Preferred position</p>
+                    <div className="flex flex-wrap gap-1" role="group" aria-label="Pro position selection">
+                      {PRO_POSITIONS.map((pos) => (
+                        <button
+                          key={pos}
+                          type="button"
+                          onClick={() => setProPosition(pos)}
+                          aria-pressed={proPosition === pos}
+                          className={cn(
+                            "min-h-[34px] min-w-[44px] rounded-md border px-2 py-1 text-[11px] font-bold transition-colors",
+                            proPosition === pos
+                              ? "border-emerald-500/60 bg-emerald-500/10 text-emerald-400"
+                              : "border-slate-800 bg-slate-950/40 text-slate-400",
+                          )}
+                        >
+                          {pos}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <p className="text-[11px] text-slate-500 leading-snug">
+                    Your Pro joins the chosen club at 17 years old with huge potential. Earn skill points from matches, shape his personality and chase the objectives.
+                  </p>
+                </div>
+              )}
               <p className="text-xs text-slate-500 mt-3 mb-2">Choose difficulty</p>
               <div className="grid grid-cols-3 gap-1.5" role="group" aria-label="Difficulty selection">
                 {(Object.keys(DIFFICULTY_META) as Difficulty[]).map((d) => (
@@ -220,10 +309,10 @@ export function OnboardingScreen() {
                 className="w-full h-12 text-base font-bold bg-emerald-500 hover:bg-emerald-400 text-slate-950"
                 disabled={!canStart || starting}
                 onClick={() => void handleStart()}
-                aria-label="Start managerial career"
+                aria-label={careerMode === "manager" ? "Start managerial career" : "Start player career"}
               >
                 <Play className="h-5 w-5 mr-2" aria-hidden />
-                {starting ? "Setting up squad..." : "Start Career"}
+                {starting ? "Setting up squad..." : careerMode === "manager" ? "Start Manager Career" : "Start Player Career"}
               </Button>
             </div>
           </div>

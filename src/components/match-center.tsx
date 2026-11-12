@@ -9,13 +9,14 @@ import { LiveMatch } from "@/components/live-match";
 import { buildUserMatchTeam, aiFormationFor, getUserNextFixture } from "@/lib/game/advance";
 import { DRILLS, runPreMatchDrills } from "@/lib/game/drills";
 import type { DrillGrade } from "@/lib/game/types";
-import { buildAiTeamConfig, estimateClubStrength } from "@/lib/game/season";
+import { buildAiTeamConfig, estimateClubStrength, simulateUserMatchQuick } from "@/lib/game/season";
 import { isDerbyFixture } from "@/lib/game/career";
 import { formatDate, formatMoney, ordinal, ratingColor } from "@/lib/format";
 import { computeTable } from "@/lib/game/season";
 import { cn } from "@/lib/utils";
-import { Award, CalendarDays, Flame, Goal, Play, Star, Swords, TrendingUp, Trophy } from "lucide-react";
+import { Award, CalendarDays, FastForward, Flame, Goal, Play, Star, Swords, TrendingUp, Trophy } from "lucide-react";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { useState } from "react";
 
 const GRADE_TEXT: Record<DrillGrade, string> = {
   A: "text-emerald-400",
@@ -32,11 +33,13 @@ export function MatchCenter() {
   const liveResult = useAppStore((s) => s.liveResult);
   const lastAdvance = useAppStore((s) => s.lastAdvance);
   const kickoff = useAppStore((s) => s.kickoff);
+  const finishMatch = useAppStore((s) => s.finishMatch);
   const clearLiveResult = useAppStore((s) => s.clearLiveResult);
   const setActiveTab = useAppStore((s) => s.setActiveTab);
   const update = useAppStore((s) => s.update);
 
   const nextFixture = useMemo(() => (game ? getUserNextFixture(game) : null), [game]);
+  const [simming, setSimming] = useState(false);
 
   const roundResults = useMemo(() => {
     if (!game || !liveResult) return [];
@@ -66,6 +69,14 @@ export function MatchCenter() {
     const userConfig = buildUserMatchTeam(game, userTeam);
     const oppConfig = buildAiTeamConfig(dataset, oppTeam, aiFormationFor(oppId));
     kickoff(nextFixture.id, userHome ? userConfig : oppConfig, userHome ? oppConfig : userConfig);
+  };
+
+  /* v6.0 — Quick Sim: instant result straight into the weekly advance */
+  const handleQuickSim = () => {
+    if (!nextFixture || simming) return;
+    setSimming(true);
+    const result = simulateUserMatchQuick(game, dataset, nextFixture);
+    void finishMatch(result).finally(() => setSimming(false));
   };
 
   /* ---------- full-time summary ---------- */
@@ -141,6 +152,23 @@ export function MatchCenter() {
               <span className="text-xs text-amber-200">MOTM: <strong>{motmPlayer.name}</strong> <span className={ratingColor(motm.rating)}>{motm.rating.toFixed(1)}</span></span>
             </div>
           )}
+          {/* v6.0 — Player Career: your Pro's performance */}
+          {(() => {
+            if (game.careerMode !== "player" || !game.pro) return null;
+            const pr = liveResult.ratings.find((r) => r.playerId === game.pro!.playerId);
+            const pro = game.players.find((p) => p.id === game.pro!.playerId);
+            if (!pro) return null;
+            return (
+              <div className="mt-2 flex items-center gap-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-2">
+                <Star className="h-4 w-4 text-emerald-400" aria-hidden />
+                <span className="text-xs text-emerald-200">
+                  Your Pro <strong>{pro.name}</strong>: {pr ? <span className={ratingColor(pr.rating)}>{pr.rating.toFixed(1)}</span> : "did not feature"}
+                  {pr && pr.goals > 0 ? ` · ${pr.goals} goal${pr.goals > 1 ? "s" : ""}` : ""}
+                  {pr && pr.assists > 0 ? ` · ${pr.assists} assist${pr.assists > 1 ? "s" : ""}` : ""}
+                </span>
+              </div>
+            );
+          })()}
         </div>
 
         {lastAdvance?.seasonEnded && lastAdvance.seasonSummary && (
@@ -181,25 +209,46 @@ export function MatchCenter() {
   /* ---------- next fixture ---------- */
   return (
     <section aria-label="Match center" className="space-y-3">
-      {/* v4.2 sacked modal */}
+      {/* v4.2 sacked modal — v6.0: with real job offers */}
       <Dialog open={Boolean(game.sacked)}>
         <DialogContent className="max-w-[400px]">
           <DialogHeader>
             <DialogTitle className="text-left">You have been sacked</DialogTitle>
             <DialogDescription className="text-left">
-              The board has terminated your contract after a poor run of results. Rebuild your career at a new club.
+              The board has terminated your contract after a poor run of results. Your agent has found {game.offers.length > 0 ? `${game.offers.length} option${game.offers.length > 1 ? "s" : ""}` : "a fresh start"}.
             </DialogDescription>
           </DialogHeader>
-          <Button
-            className="w-full h-11 bg-emerald-500 text-slate-950 font-bold"
-            onClick={() => {
-              useAppStore.getState().update((g) => { g.sacked = false; });
-              void useAppStore.getState().startCareer(game.managerName, game.clubId, game.difficulty);
-            }}
-            aria-label="Start fresh career at a new club"
-          >
-            Rebuild your career (new save)
-          </Button>
+          {game.offers.length > 0 ? (
+            <div className="space-y-2">
+              {game.offers.map((o) => (
+                <div key={o.id} className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
+                  <p className="text-sm font-bold text-slate-100">{o.teamName}</p>
+                  <p className="text-[11px] text-slate-500 mt-0.5">Objective: top {o.objectiveTarget} · Budget {formatMoney(o.transferBudget)} · Wages {formatMoney(o.wageBudget)}/w</p>
+                  <Button
+                    size="sm"
+                    className="mt-2 w-full h-9 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold"
+                    onClick={() => {
+                      void useAppStore.getState().doAcceptOffer(o.id);
+                    }}
+                    aria-label={`Accept job at ${o.teamName}`}
+                  >
+                    Accept the job
+                  </Button>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <Button
+              className="w-full h-11 bg-emerald-500 text-slate-950 font-bold"
+              onClick={() => {
+                useAppStore.getState().update((g) => { g.sacked = false; });
+                void useAppStore.getState().startCareer(game.managerName, game.clubId, game.difficulty);
+              }}
+              aria-label="Start fresh career at a new club"
+            >
+              Rebuild your career (new save)
+            </Button>
+          )}
         </DialogContent>
       </Dialog>
 
@@ -347,15 +396,28 @@ export function MatchCenter() {
               </>
             );
           })()}
-          <Button
-            size="lg"
-            className="mt-4 w-full h-12 text-base font-bold bg-emerald-500 hover:bg-emerald-400 text-slate-950"
-            onClick={handleKickoff}
-            aria-label="Kick off match"
-          >
-            <Play className="h-5 w-5 mr-2 fill-slate-950" aria-hidden />
-            Kick Off
-          </Button>
+          <div className="mt-4 grid grid-cols-2 gap-2">
+            <Button
+              size="lg"
+              className="w-full h-12 text-base font-bold bg-emerald-500 hover:bg-emerald-400 text-slate-950"
+              onClick={handleKickoff}
+              aria-label="Kick off match"
+            >
+              <Play className="h-5 w-5 mr-2 fill-slate-950" aria-hidden />
+              Kick Off
+            </Button>
+            <Button
+              size="lg"
+              variant="outline"
+              className="w-full h-12 text-base font-bold border-slate-600 text-slate-200 hover:border-emerald-600/50 hover:text-emerald-400"
+              onClick={handleQuickSim}
+              disabled={simming}
+              aria-label="Quick simulate match"
+            >
+              <FastForward className="h-5 w-5 mr-2" aria-hidden />
+              {simming ? "Sim..." : "Quick Sim"}
+            </Button>
+          </div>
           {squadInjuries > 0 && (
             <p className="mt-2 text-center text-[11px] text-amber-400">{squadInjuries} injured player{squadInjuries > 1 ? "s" : ""} unavailable</p>
           )}

@@ -1,7 +1,7 @@
 "use client";
 
 import { create } from "zustand";
-import type { Dataset, Difficulty, GameState, HalftimePayload, MatchResult, MatchTeamConfig, Mentality, TacticSliders } from "@/lib/game/types";
+import type { CareerMode, Dataset, Difficulty, GameState, HalftimePayload, MatchResult, MatchTeamConfig, Mentality, PositionCode, TacticSliders } from "@/lib/game/types";
 import {
   getGameDb,
   getDatasetSource,
@@ -10,13 +10,17 @@ import {
   persistActiveDataset,
   putSave,
 } from "@/lib/game/dexie";
-import { createCareerState, advanceAfterUserMatch, buyPlayer, sellPlayer, refreshLineup, migrateGameState, type AdvanceOutcome } from "@/lib/game/advance";
+import { acceptJobOffer, advanceAfterUserMatch, buyPlayer, createCareerState, sellPlayer, refreshLineup, migrateGameState, type AdvanceOutcome } from "@/lib/game/advance";
+import { loanInPlayer, releasePlayer } from "@/lib/game/career";
+import { createPlayerCareerState } from "@/lib/game/playerCareer";
 import { EMPTY_DATASET } from "@/lib/game/defaultData";
 import { computeOverall, migratePlayerAttributes } from "@/lib/game/attributes";
 import { MatchRunner, type TickPayload } from "@/lib/game/matchEngine";
 import type { LiveMatchSnapshot } from "@/lib/game/types";
 
-export type TabKey = "home" | "squad" | "tactics" | "transfers" | "more";
+/** v6.0 — manager tabs: Central/Squad/Transfers/Season/Office.
+ *  player tabs add: My Pro, Activities (agent lives inside My Pro). */
+export type TabKey = "home" | "squad" | "transfers" | "season" | "office" | "mypro" | "activities";
 type Phase = "boot" | "onboarding" | "manage";
 
 export interface CloudSaveMeta {
@@ -122,7 +126,7 @@ interface AppStore {
   boot: () => Promise<void>;
   setActiveTab: (tab: TabKey) => void;
   setCloudOnline: (v: boolean) => void;
-  startCareer: (managerName: string, clubId: number, difficulty?: Difficulty) => Promise<void>;
+  startCareer: (managerName: string, clubId: number, difficulty?: Difficulty, mode?: CareerMode, proName?: string, proPosition?: PositionCode) => Promise<void>;
   continueSave: (cloudId: string) => Promise<void>;
   removeSave: (cloudId: string) => Promise<void>;
   resetAllData: () => Promise<void>;
@@ -149,6 +153,9 @@ interface AppStore {
   /* transfers */
   doBuyPlayer: (playerId: number) => { ok: boolean; message: string };
   doSellPlayer: (playerId: number) => { ok: boolean; message: string };
+  doReleasePlayer: (playerId: number) => { ok: boolean; message: string };
+  doLoanInPlayer: (playerId: number) => { ok: boolean; message: string };
+  doAcceptOffer: (offerId: string) => { ok: boolean; message: string };
 
   /* master database sync (device <- Neon) */
   pullCloudDatabase: () => Promise<{ ok: boolean; message: string }>;
@@ -295,12 +302,21 @@ export const useAppStore = create<AppStore>((set, get) => {
     setActiveTab: (tab) => set({ activeTab: tab }),
     setCloudOnline: (v) => set({ cloudOnline: v }),
 
-    startCareer: async (managerName, clubId, difficulty = "pro") => {
+    startCareer: async (managerName, clubId, difficulty = "pro", mode: CareerMode = "manager", proName = "", proPosition: PositionCode = "ST") => {
       const dataset = get().dataset;
       if (!dataset) return;
-      const game = createCareerState(managerName, clubId, dataset, difficulty);
-      const { recordId } = await persistGame(game, undefined, dataset);
-      set({ game, saveId: recordId, phase: "manage", activeTab: "home" });
+      let game: GameState;
+      let ds: Dataset = dataset;
+      if (mode === "player") {
+        const res = createPlayerCareerState(proName, proPosition, clubId, dataset, difficulty);
+        game = res.game;
+        ds = res.dataset;
+        await persistActiveDataset(ds, get().datasetSource ?? "cache").catch(() => undefined);
+      } else {
+        game = createCareerState(managerName, clubId, dataset, difficulty);
+      }
+      const { recordId } = await persistGame(game, undefined, ds);
+      set({ game, dataset: ds, saveId: recordId, phase: "manage", activeTab: "home" });
     },
 
     continueSave: async (cloudId) => {
@@ -578,6 +594,55 @@ export const useAppStore = create<AppStore>((set, get) => {
         set({ game: res.game, dataset: res.dataset });
         void persistActiveDataset(res.dataset, get().datasetSource ?? "cache").catch(() => undefined);
         void persistGame(res.game, get().saveId ?? undefined, res.dataset).catch(() => undefined);
+      }
+      return { ok: res.ok, message: res.message };
+    },
+
+    doReleasePlayer: (playerId) => {
+      const { game, dataset } = get();
+      if (!game || !dataset) return { ok: false, message: "No active career" };
+      const working = structuredClone(game);
+      const res = releasePlayer(working, playerId);
+      if (res.ok) {
+        const released = res;
+        const g = structuredClone(working);
+        refreshLineup(g);
+        // the released player becomes a free agent in the market world
+        const row = structuredClone(game).players.find((p) => p.id === playerId);
+        const ds: Dataset = structuredClone(dataset);
+        if (row) {
+          ds.players.push({ id: row.id, teamId: -1, name: row.name, age: row.age, position: row.position, overallRating: row.overallRating, potential: row.potential, marketValue: row.marketValue, salary: row.salary, attributes: row.attributes });
+        }
+        set({ game: g, dataset: ds });
+        void persistActiveDataset(ds, get().datasetSource ?? "cache").catch(() => undefined);
+        void persistGame(g, get().saveId ?? undefined, ds).catch(() => undefined);
+        return { ok: true, message: released.message };
+      }
+      return { ok: false, message: res.message };
+    },
+
+    doLoanInPlayer: (playerId) => {
+      const { game, dataset } = get();
+      if (!game || !dataset) return { ok: false, message: "No active career" };
+      const g = structuredClone(game);
+      const res = loanInPlayer(g, dataset, playerId);
+      if (res.ok) {
+        refreshLineup(g);
+        set({ game: g });
+        void persistGame(g, get().saveId ?? undefined, dataset).catch(() => undefined);
+      }
+      return { ok: res.ok, message: res.message };
+    },
+
+    doAcceptOffer: (offerId) => {
+      const { game, dataset } = get();
+      if (!game || !dataset) return { ok: false, message: "No active career" };
+      const res = acceptJobOffer(game, dataset, offerId);
+      if (res.ok && res.game) {
+        const g = res.game;
+        refreshLineup(g);
+        set({ game: g, activeTab: "home" });
+        void persistGame(g, get().saveId ?? undefined, dataset).catch(() => undefined);
       }
       return { ok: res.ok, message: res.message };
     },

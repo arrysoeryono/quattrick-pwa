@@ -1,13 +1,53 @@
 /** Shared formatting helpers. */
 
+import type { Currency } from "./game/types";
+
+/** v6.0 — multi-currency support (Office > Settings). Module-level so every
+ *  existing formatMoney/formatWage call site picks it up automatically. */
+const CURRENCY_META: Record<Currency, { symbol: string; rate: number }> = {
+  USD: { symbol: "$", rate: 1 },
+  EUR: { symbol: "€", rate: 0.92 },
+  GBP: { symbol: "£", rate: 0.79 },
+  IDR: { symbol: "Rp", rate: 15800 },
+};
+
+let ACTIVE_CURRENCY: Currency = "USD";
+
+export function setCurrency(c: Currency | undefined | null): void {
+  if (c && c in CURRENCY_META) ACTIVE_CURRENCY = c;
+}
+
+export function getCurrency(): Currency {
+  return ACTIVE_CURRENCY;
+}
+
+export const CURRENCIES: Currency[] = ["USD", "EUR", "GBP", "IDR"];
+
 export function formatMoney(v: number): string {
-  if (Math.abs(v) >= 1_000_000) return `$${(v / 1_000_000).toFixed(v % 1_000_000 === 0 ? 0 : 1)}M`;
-  if (Math.abs(v) >= 1_000) return `$${(v / 1_000).toFixed(0)}K`;
-  return `$${v}`;
+  const { symbol, rate } = CURRENCY_META[ACTIVE_CURRENCY];
+  const x = v * rate;
+  if (ACTIVE_CURRENCY === "IDR") {
+    if (Math.abs(x) >= 1e12) return `${symbol}${(x / 1e12).toFixed(1)}T`;
+    if (Math.abs(x) >= 1e9) return `${symbol}${(x / 1e9).toFixed(x % 1e9 === 0 ? 0 : 1)}M`;
+    if (Math.abs(x) >= 1e6) return `${symbol}${(x / 1e6).toFixed(0)}Jt`;
+    if (Math.abs(x) >= 1e3) return `${symbol}${(x / 1e3).toFixed(0)}K`;
+    return `${symbol}${Math.round(x)}`;
+  }
+  if (Math.abs(x) >= 1_000_000) return `${symbol}${(x / 1_000_000).toFixed(x % 1_000_000 === 0 ? 0 : 1)}M`;
+  if (Math.abs(x) >= 1_000) return `${symbol}${(x / 1_000).toFixed(0)}K`;
+  return `${symbol}${Math.round(x)}`;
 }
 
 export function formatWage(v: number): string {
-  return `$${(v / 1000).toFixed(1)}K/w`;
+  const { symbol, rate } = CURRENCY_META[ACTIVE_CURRENCY];
+  const x = v * rate;
+  if (ACTIVE_CURRENCY === "IDR") {
+    if (Math.abs(x) >= 1e9) return `${symbol}${(x / 1e9).toFixed(1)}M/w`;
+    if (Math.abs(x) >= 1e6) return `${symbol}${(x / 1e6).toFixed(0)}Jt/w`;
+    if (Math.abs(x) >= 1e3) return `${symbol}${(x / 1e3).toFixed(0)}K/w`;
+    return `${symbol}${Math.round(x)}/w`;
+  }
+  return `${symbol}${(x / 1000).toFixed(1)}K/w`;
 }
 
 export function formatDate(iso: string): string {

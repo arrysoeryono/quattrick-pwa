@@ -6,12 +6,13 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
-import { PlayerDetailBody } from "@/components/player-detail";
+import { PlayerDetailBody, PlayerClubActions } from "@/components/player-detail";
 import { DevelopmentPanel } from "@/components/development-panel";
+import { TacticsTab } from "@/components/tabs/tactics-tab";
 import { cn } from "@/lib/utils";
 import { posBadgeClass, ratingColor, formatMoney } from "@/lib/format";
-import { ALL_POSITIONS } from "@/lib/game/types";
-import { Cross, Filter, Search, X } from "lucide-react";
+import { ALL_POSITIONS, type TrainingFocus } from "@/lib/game/types";
+import { Cross, Filter, HeartPulse, ListChecks, Search, Settings2, Users, X } from "lucide-react";
 
 type GroupFilter = "ALL" | "GK" | "DEF" | "MID" | "ATT";
 type SortKey = "ovr" | "pot" | "age" | "form" | "value" | "wage";
@@ -23,7 +24,67 @@ const GROUPS: Record<Exclude<GroupFilter, "ALL">, string[]> = {
   ATT: ["LW", "RW", "LF", "RF", "CF", "ST"],
 };
 
+type SquadSubView = "hub" | "tactics" | "development" | "training" | "injuries";
+
+const FOCUS_SHORT: Record<TrainingFocus, string> = {
+  balanced: "Balanced",
+  attacking: "Attacking",
+  defensive: "Defensive",
+  technical: "Technical",
+  pace: "Pace",
+  shooting: "Shooting",
+  "shot-stopping": "Shot Stop",
+  handling: "Handling",
+  positioning: "Positioning",
+  distribution: "Distribution",
+  agility: "Agility",
+};
+
+/** v6.0 — FC-style Squad section with sub-screens (FC 25 Squad tab). */
 export function SquadTab() {
+  const [sub, setSub] = useState<SquadSubView>("hub");
+  const game = useAppStore((s) => s.game);
+
+  const SUBS: { key: SquadSubView; label: string; icon: typeof Users }[] = [
+    { key: "hub", label: "Hub", icon: Users },
+    { key: "tactics", label: "Team Mgmt", icon: Settings2 },
+    { key: "development", label: "Development", icon: ListChecks },
+    { key: "training", label: "Training", icon: HeartPulse },
+    { key: "injuries", label: "Injuries", icon: Cross },
+  ];
+
+  return (
+    <div className="space-y-3">
+      <nav aria-label="Squad sections" className="flex gap-1.5 overflow-x-auto scrollbar-thin -mx-1 px-1 pb-1">
+        {SUBS.map(({ key, label, icon: Icon }) => (
+          <button
+            key={key}
+            type="button"
+            onClick={() => setSub(key)}
+            aria-pressed={sub === key}
+            className={cn(
+              "flex items-center gap-1.5 h-9 px-3 rounded-lg border text-xs font-semibold shrink-0 transition-colors min-h-[36px]",
+              sub === key
+                ? "border-emerald-500/50 bg-emerald-500/10 text-emerald-400"
+                : "border-slate-800 bg-slate-950/40 text-slate-400 hover:text-slate-200",
+            )}
+          >
+            <Icon className="h-3.5 w-3.5" aria-hidden />
+            {label}
+          </button>
+        ))}
+      </nav>
+      {sub === "hub" && <SquadHub />}
+      {sub === "tactics" && <TacticsTab />}
+      {sub === "development" && <DevelopmentView />}
+      {sub === "training" && <TrainingView />}
+      {sub === "injuries" && <InjuriesView />}
+      {game && game.players.length === 0 && sub === "hub" && null}
+    </div>
+  );
+}
+
+function SquadHub() {
   const game = useAppStore((s) => s.game);
   const [filter, setFilter] = useState<GroupFilter>("ALL");
   const [query, setQuery] = useState("");
@@ -266,6 +327,8 @@ export function SquadTab() {
                 <Separator className="my-3 bg-slate-800" />
                 <DevelopmentPanel player={selected} />
                 <Separator className="my-3 bg-slate-800" />
+                <PlayerClubActions player={selected} />
+                <Separator className="my-3 bg-slate-800" />
                 <div className="grid grid-cols-3 gap-2 text-center">
                   <div className="rounded-lg bg-slate-950/60 p-2">
                     <p className="text-[10px] text-slate-500 uppercase">Apps</p>
@@ -287,6 +350,137 @@ export function SquadTab() {
           )}
         </SheetContent>
       </Sheet>
+    </div>
+  );
+}
+
+/* ================= v6.0 sub-screens ================= */
+
+function DevelopmentView() {
+  const game = useAppStore((s) => s.game);
+  if (!game) return null;
+  const list = [...game.players].sort((a, b) => b.potential - a.potential);
+  return (
+    <div className="space-y-2">
+      <p className="text-[11px] text-slate-500">
+        Individual development plans. Edit focus and intensity in each player profile (Squad Hub).
+      </p>
+      {list.map((p) => (
+        <div key={p.id} className="rounded-xl border border-slate-800 bg-slate-950/40 p-3">
+          <div className="flex items-center gap-2">
+            <Badge variant="outline" className={cn("text-[10px] font-bold", posBadgeClass(p.position))}>{p.position}</Badge>
+            <p className="text-xs font-bold text-slate-200 truncate flex-1">{p.name}</p>
+            <span className="text-[10px] text-slate-500 shrink-0">{p.overallRating} OVR · {p.potential} POT</span>
+          </div>
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            <Badge variant="outline" className="text-[10px] border-slate-700 text-slate-300">
+              {FOCUS_SHORT[p.trainingPlan.focus]} · {p.trainingPlan.intensity}
+            </Badge>
+            {p.devPath && (
+              <Badge variant="outline" className="text-[10px] border-teal-600/40 text-teal-300">
+                {p.devPath.replace("-", " ")}
+              </Badge>
+            )}
+            {p.retrain && (
+              <Badge variant="outline" className="text-[10px] border-amber-500/40 text-amber-400">
+                Retraining to {p.retrain.target} · {p.retrain.weeksLeft}w left
+              </Badge>
+            )}
+            {p.mentor && (
+              <Badge variant="outline" className="text-[10px] border-emerald-600/40 text-emerald-400">
+                Mentored · {p.mentor.weeksLeft}w left
+              </Badge>
+            )}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function TrainingView() {
+  const game = useAppStore((s) => s.game);
+  const update = useAppStore((s) => s.update);
+  if (!game) return null;
+  const balance = game.teamTraining?.balance ?? 50;
+  const avgSharp = Math.round(game.players.reduce((s, p) => s + p.sharpness, 0) / Math.max(game.players.length, 1));
+  const avgStamina = Math.round(game.players.reduce((s, p) => s + p.stamina, 0) / Math.max(game.players.length, 1));
+  return (
+    <div className="space-y-3">
+      <section aria-label="Weekly training balance" className="rounded-xl border border-slate-800 bg-slate-950/40 p-4">
+        <div className="flex items-center justify-between text-xs">
+          <span className="font-semibold text-slate-300">Weekly training balance</span>
+          <span className="text-[10px] text-slate-500">{avgSharp} sharp · {avgStamina} fresh</span>
+        </div>
+        <input
+          type="range"
+          min={0}
+          max={100}
+          step={5}
+          value={balance}
+          onChange={(e) => update((g) => { g.teamTraining.balance = Number(e.target.value); })}
+          className="mt-3 w-full accent-emerald-500"
+          aria-label="Training balance between energy recovery and performance"
+        />
+        <div className="mt-1 flex justify-between text-[10px] text-slate-500">
+          <span>All Out Energy (recovery)</span>
+          <span className="font-bold text-slate-300">{balance}</span>
+          <span>All Out Performance (sharpness)</span>
+        </div>
+        <p className="mt-2 text-[11px] text-slate-500 leading-snug">
+          Energy bias recovers condition faster but match sharpness fades. Performance bias keeps players razor sharp but drains the tank.
+        </p>
+      </section>
+      <section aria-label="Squad condition" className="rounded-xl border border-slate-800 bg-slate-950/40 p-3">
+        <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 mb-2">Squad condition</p>
+        <div className="space-y-1.5 max-h-72 overflow-y-auto scrollbar-thin">
+          {[...game.players].sort((a, b) => a.stamina - b.stamina).map((p) => (
+            <div key={p.id} className="flex items-center gap-2 text-[11px]">
+              <span className="w-28 truncate text-slate-300">{p.name}</span>
+              <div className="flex-1 h-1.5 rounded-full bg-slate-800 overflow-hidden" aria-hidden>
+                <div className="h-full bg-emerald-500" style={{ width: `${p.stamina}%` }} />
+              </div>
+              <span className="w-8 text-right text-slate-400 tabular-nums">{p.stamina}</span>
+              <div className="flex-1 h-1.5 rounded-full bg-slate-800 overflow-hidden" aria-hidden>
+                <div className="h-full bg-amber-400" style={{ width: `${p.sharpness}%` }} />
+              </div>
+              <span className="w-8 text-right text-slate-400 tabular-nums">{p.sharpness}</span>
+            </div>
+          ))}
+        </div>
+        <p className="mt-2 text-[10px] text-slate-600">Green = condition · Amber = match sharpness</p>
+      </section>
+    </div>
+  );
+}
+
+function InjuriesView() {
+  const game = useAppStore((s) => s.game);
+  if (!game) return null;
+  const injured = game.players.filter((p) => p.injuryWeeks > 0).sort((a, b) => a.injuryWeeks - b.injuryWeeks);
+  return (
+    <div className="space-y-2">
+      <p className="text-[11px] text-slate-500">
+        Treatment room. Injured players are excluded from auto-pick until cleared.
+      </p>
+      {injured.length === 0 && (
+        <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-6 text-center">
+          <p className="text-xs font-semibold text-emerald-400">Full squad available</p>
+          <p className="text-[11px] text-slate-500 mt-1">Nobody is on the treatment table. Enjoy it while it lasts.</p>
+        </div>
+      )}
+      {injured.map((p) => (
+        <div key={p.id} className="rounded-xl border border-rose-500/25 bg-rose-500/5 p-3">
+          <div className="flex items-center gap-2">
+            <Badge variant="outline" className={cn("text-[10px] font-bold", posBadgeClass(p.position))}>{p.position}</Badge>
+            <p className="text-xs font-bold text-slate-200 truncate flex-1">{p.name}</p>
+            <Badge variant="outline" className="text-[10px] border-rose-500/40 text-rose-400">{p.injuryWeeks}w out</Badge>
+          </div>
+          <p className="mt-1 text-[11px] text-slate-500">
+            {p.overallRating} OVR · {formatMoney(p.salary)}/w · value {formatMoney(p.marketValue)}
+          </p>
+        </div>
+      ))}
     </div>
   );
 }

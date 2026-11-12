@@ -10,8 +10,22 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { cn } from "@/lib/utils";
 import { formatMoney, formatWage, posBadgeClass } from "@/lib/format";
 import { ALL_POSITIONS, type PlayerRow } from "@/lib/game/types";
-import { queueScout, scoutCost, scoutEstimate } from "@/lib/game/career";
-import { ArrowDownUp, BadgeCheck, Eye, Filter, Search, X } from "lucide-react";
+import {
+  assignGtn,
+  cancelGtn,
+  fireYouthScout,
+  GTN_POSITION_GROUPS,
+  hireYouthScout,
+  queueScout,
+  scoutCost,
+  scoutEstimate,
+  toggleShortlist,
+  transferWindow,
+  weekOfSeason,
+  youthTournament,
+  YOUTH_SCOUT_TIERS,
+} from "@/lib/game/career";
+import { ArrowDownUp, BadgeCheck, Briefcase, Eye, Filter, GraduationCap, Search, Star, X } from "lucide-react";
 
 type GroupFilter = "ALL" | "GK" | "DEF" | "MID" | "ATT";
 type SortKey = "ovr" | "value" | "age" | "potential";
@@ -23,7 +37,48 @@ const GROUPS: Record<Exclude<GroupFilter, "ALL">, string[]> = {
   ATT: ["LW", "RW", "LF", "RF", "CF", "ST"],
 };
 
+type TransferSubView = "market" | "hub" | "gtn" | "youth";
+
+/** v6.0 — FC-style Transfers section: Market / Transfer Hub / GTN / Youth Academy. */
 export function TransfersTab() {
+  const [sub, setSub] = useState<TransferSubView>("market");
+
+  const SUBS: { key: TransferSubView; label: string }[] = [
+    { key: "market", label: "Market" },
+    { key: "hub", label: "Transfer Hub" },
+    { key: "gtn", label: "GTN" },
+    { key: "youth", label: "Youth Academy" },
+  ];
+
+  return (
+    <div className="space-y-3">
+      <nav aria-label="Transfer sections" className="flex gap-1.5 overflow-x-auto scrollbar-thin -mx-1 px-1 pb-1">
+        {SUBS.map(({ key, label }) => (
+          <button
+            key={key}
+            type="button"
+            onClick={() => setSub(key)}
+            aria-pressed={sub === key}
+            className={cn(
+              "h-9 px-3 rounded-lg border text-xs font-semibold shrink-0 transition-colors min-h-[36px]",
+              sub === key
+                ? "border-emerald-500/50 bg-emerald-500/10 text-emerald-400"
+                : "border-slate-800 bg-slate-950/40 text-slate-400 hover:text-slate-200",
+            )}
+          >
+            {label}
+          </button>
+        ))}
+      </nav>
+      {sub === "market" && <MarketView />}
+      {sub === "hub" && <TransferHubView />}
+      {sub === "gtn" && <GtnView />}
+      {sub === "youth" && <YouthAcademyView />}
+    </div>
+  );
+}
+
+function MarketView() {
   const game = useAppStore((s) => s.game);
   const dataset = useAppStore((s) => s.dataset);
   const doBuyPlayer = useAppStore((s) => s.doBuyPlayer);
@@ -250,6 +305,14 @@ export function TransfersTab() {
             const affordable = price <= game.transferBudget;
             return (
               <li key={p.id} className="flex items-center gap-2.5 rounded-xl border border-slate-800 bg-slate-950/40 p-2.5">
+                <button
+                  type="button"
+                  onClick={() => useAppStore.getState().update((g) => toggleShortlist(g, p.id))}
+                  className="shrink-0"
+                  aria-label={game.shortlist.includes(p.id) ? `Remove ${p.name} from shortlist` : `Shortlist ${p.name}`}
+                >
+                  <Star className={cn("h-4 w-4", game.shortlist.includes(p.id) ? "fill-amber-400 text-amber-400" : "text-slate-600 hover:text-slate-400")} aria-hidden />
+                </button>
                 <span className={cn("rounded-md border px-1.5 py-0.5 text-[10px] font-bold w-11 text-center shrink-0", posBadgeClass(p.position))}>
                   {p.position}
                 </span>
@@ -349,6 +412,20 @@ export function TransfersTab() {
               </div>
               <div className="flex gap-2">
                 <Button variant="outline" className="flex-1 border-slate-700" onClick={() => setTarget(null)}>Cancel</Button>
+                {target.teamId !== -1 && (
+                  <Button
+                    variant="outline"
+                    className="flex-1 border-sky-600/50 text-sky-400 font-bold"
+                    onClick={() => {
+                      const res = useAppStore.getState().doLoanInPlayer(target.id);
+                      setTarget(null);
+                      if (!res.ok) { setBuySuccess(null); setBuyError(res.message); } else { setBuyError(null); setBuySuccess(res.message); }
+                    }}
+                    aria-label={`Loan in ${target.name} for 12 weeks`}
+                  >
+                    Loan in
+                  </Button>
+                )}
                 <Button
                   className="flex-1 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold"
                   onClick={confirmBuy}
@@ -385,6 +462,352 @@ export function TransfersTab() {
           )}
         </DialogContent>
       </Dialog>
+    </div>
+  );
+}
+
+/* ================= v6.0 sub-screens ================= */
+
+function TransferHubView() {
+  const game = useAppStore((s) => s.game);
+  const dataset = useAppStore((s) => s.dataset);
+  const doSellPlayer = useAppStore((s) => s.doSellPlayer);
+  const [msg, setMsg] = useState<string | null>(null);
+  if (!game || !dataset) return null;
+
+  const teamLabel = (teamId: number) => {
+    if (teamId === -1) return "Free Agent";
+    return dataset.teams.find((t) => t.id === teamId)?.shortName ?? "???";
+  };
+  const shortlisted = game.shortlist
+    .map((id) => dataset.players.find((p) => p.id === id))
+    .filter((p): p is PlayerRow => Boolean(p));
+  const listed = game.players.filter((p) => game.transferListedIds.includes(p.id));
+  const loanListed = game.players.filter((p) => game.loanListedIds.includes(p.id));
+  const incomingBids = game.inbox.filter((m) => m.kind === "bid" && !m.resolvedOptionId);
+
+  return (
+    <div className="space-y-3">
+      {msg && <p role="status" className="rounded-lg border border-emerald-500/40 bg-emerald-500/10 p-2.5 text-xs text-emerald-300">{msg}</p>}
+
+      {/* incoming bids */}
+      <section aria-label="Incoming bids">
+        <h2 className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-2 flex items-center gap-1.5">
+          <Briefcase className="h-3.5 w-3.5" aria-hidden /> Incoming offers ({incomingBids.length})
+        </h2>
+        {incomingBids.length === 0 ? (
+          <p className="text-[11px] text-slate-600">No live bids. Put players on the transfer list to attract offers.</p>
+        ) : (
+          <div className="space-y-2">
+            {incomingBids.map((b) => (
+              <div key={b.id} className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-3">
+                <p className="text-xs font-bold text-slate-100">{b.title}</p>
+                <p className="text-[11px] text-slate-400 mt-0.5">{b.body}</p>
+                <p className="mt-1.5 text-[10px] text-amber-400">Answer in the Central inbox.</p>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+
+      {/* transfer list */}
+      <section aria-label="Transfer list">
+        <h2 className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-2">On the transfer list ({listed.length})</h2>
+        {listed.length === 0 ? (
+          <p className="text-[11px] text-slate-600">Nobody listed. Mark players in their Squad Hub profile.</p>
+        ) : (
+          <ul className="space-y-1.5">
+            {listed.map((p) => (
+              <li key={p.id} className="flex items-center gap-2.5 rounded-xl border border-slate-800 bg-slate-950/40 p-2.5">
+                <span className={cn("rounded-md border px-1.5 py-0.5 text-[10px] font-bold w-11 text-center shrink-0", posBadgeClass(p.position))}>{p.position}</span>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold text-slate-100 truncate">{p.name}</p>
+                  <p className="text-[11px] text-slate-500">{p.overallRating} OVR · value {formatMoney(p.marketValue)}</p>
+                </div>
+                <Button size="sm" variant="outline" className="h-8 border-rose-500/40 text-rose-400" onClick={() => { const r = doSellPlayer(p.id); setMsg(r.message); }} aria-label={`Sell ${p.name}`}>
+                  Sell now
+                </Button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      {/* loan list */}
+      <section aria-label="Loan list">
+        <h2 className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-2">On the loan list ({loanListed.length})</h2>
+        {loanListed.length === 0 ? (
+          <p className="text-[11px] text-slate-600">Nobody available for loan. Youngters benefit most from a spell elsewhere.</p>
+        ) : (
+          <ul className="space-y-1.5">
+            {loanListed.map((p) => (
+              <li key={p.id} className="flex items-center gap-2.5 rounded-xl border border-slate-800 bg-slate-950/40 p-2.5">
+                <span className={cn("rounded-md border px-1.5 py-0.5 text-[10px] font-bold w-11 text-center shrink-0", posBadgeClass(p.position))}>{p.position}</span>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold text-slate-100 truncate">{p.name}</p>
+                  <p className="text-[11px] text-slate-500">{p.age}y · {p.overallRating} OVR · waiting for a loan club</p>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      {/* active loans */}
+      <section aria-label="Active loans">
+        <h2 className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-2">Active loans ({game.loans.length})</h2>
+        {game.loans.length === 0 ? (
+          <p className="text-[11px] text-slate-600">No players out or in on loan.</p>
+        ) : (
+          <ul className="space-y-1.5">
+            {game.loans.map((l) => (
+              <li key={l.id} className="flex items-center gap-2.5 rounded-xl border border-slate-800 bg-slate-950/40 p-2.5">
+                <Badge variant="outline" className={cn("text-[9px] shrink-0", l.direction === "out" ? "border-slate-600 text-slate-400" : "border-sky-600/50 text-sky-400")}>
+                  {l.direction === "out" ? "OUT" : "IN"}
+                </Badge>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold text-slate-100 truncate">{l.playerName}</p>
+                  <p className="text-[11px] text-slate-500">
+                    {l.direction === "out" ? `at ${teamLabel(l.partnerTeamId)}` : `from ${teamLabel(l.partnerTeamId)}`} · {l.weeksLeft}w left
+                  </p>
+                </div>
+                <span className={cn("rounded-md border px-1.5 py-0.5 text-[10px] font-bold shrink-0", posBadgeClass(l.position))}>{l.position}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      {/* shortlist */}
+      <section aria-label="Shortlist">
+        <h2 className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-2">Shortlist ({shortlisted.length})</h2>
+        {shortlisted.length === 0 ? (
+          <p className="text-[11px] text-slate-600">Tap the star on any market player to shortlist him.</p>
+        ) : (
+          <ul className="space-y-1.5">
+            {shortlisted.map((p) => {
+              const scouted = game.scoutedIds.includes(p.id);
+              return (
+                <li key={p.id} className="flex items-center gap-2.5 rounded-xl border border-slate-800 bg-slate-950/40 p-2.5">
+                  <Star className="h-4 w-4 fill-amber-400 text-amber-400 shrink-0" aria-hidden />
+                  <span className={cn("rounded-md border px-1.5 py-0.5 text-[10px] font-bold w-11 text-center shrink-0", posBadgeClass(p.position))}>{p.position}</span>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-semibold text-slate-100 truncate">{p.name}</p>
+                    <p className="text-[11px] text-slate-500">
+                      {teamLabel(p.teamId)} · Age {p.age} · {scouted ? `${p.overallRating} OVR / ${p.potential} POT` : "unscouted"} · {formatMoney(p.marketValue)}
+                    </p>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-8 border-slate-700 text-slate-400"
+                    onClick={() => useAppStore.getState().update((g) => toggleShortlist(g, p.id))}
+                    aria-label={`Remove ${p.name} from shortlist`}
+                  >
+                    <X className="h-3.5 w-3.5" aria-hidden />
+                  </Button>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </section>
+    </div>
+  );
+}
+
+function GtnView() {
+  const game = useAppStore((s) => s.game);
+  const dataset = useAppStore((s) => s.dataset);
+  const [group, setGroup] = useState<string>("ATT");
+  const [maxAge, setMaxAge] = useState(24);
+  if (!game || !dataset) return null;
+
+  const reports = game.gtnReport
+    .map((r) => ({ ...r, player: dataset.players.find((p) => p.id === r.playerId) }))
+    .filter((r): r is typeof r & { player: PlayerRow } => Boolean(r.player));
+  const full = game.gtn.length >= 3;
+
+  return (
+    <div className="space-y-3">
+      <section aria-label="GTN assignments" className="rounded-xl border border-slate-800 bg-slate-950/40 p-3">
+        <h2 className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-1">Global Transfer Network</h2>
+        <p className="text-[11px] text-slate-500 mb-2">
+          Send the scouting network after a player profile. Each assignment takes 3 weeks, costs {formatMoney(60000)} a week and unlocks full dossiers for the findings.
+        </p>
+        {game.gtn.length === 0 ? (
+          <p className="text-[11px] text-slate-600">No active assignments.</p>
+        ) : (
+          <ul className="space-y-1.5 mb-3">
+            {game.gtn.map((a) => (
+              <li key={a.id} className="flex items-center gap-2 rounded-lg border border-slate-800 bg-slate-950/60 p-2.5">
+                <Badge variant="outline" className="text-[10px] border-emerald-600/40 text-emerald-400 shrink-0">
+                  {GTN_POSITION_GROUPS.find((g) => g.id === a.positionGroup)?.label ?? a.positionGroup}
+                </Badge>
+                <span className="text-[11px] text-slate-400 flex-1">max age {a.maxAge}</span>
+                <span className="text-[11px] text-amber-400 shrink-0">{a.weeksLeft}w left</span>
+                <Button size="sm" variant="ghost" className="h-7 text-[10px] text-slate-500" onClick={() => useAppStore.getState().update((g) => cancelGtn(g, a.id))} aria-label="Cancel assignment">
+                  Cancel
+                </Button>
+              </li>
+            ))}
+          </ul>
+        )}
+        <div className="flex flex-wrap gap-1.5 mb-2">
+          {GTN_POSITION_GROUPS.map((g) => (
+            <button
+              key={g.id}
+              type="button"
+              onClick={() => setGroup(g.id)}
+              aria-pressed={group === g.id}
+              className={cn(
+                "rounded-md border px-2.5 py-1.5 text-[11px] font-bold min-h-[32px]",
+                group === g.id ? "border-emerald-500/60 bg-emerald-500/10 text-emerald-400" : "border-slate-800 text-slate-400",
+              )}
+            >
+              {g.label}
+            </button>
+          ))}
+        </div>
+        <div className="flex items-center gap-2">
+          <label className="text-[10px] text-slate-500 flex-1">
+            Max age: <span className="font-mono text-slate-300">{maxAge}</span>
+            <input type="range" min={17} max={35} value={maxAge} onChange={(e) => setMaxAge(Number(e.target.value))} className="w-full accent-emerald-500" aria-label="Maximum age for GTN search" />
+          </label>
+          <Button
+            size="sm"
+            className="h-9 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold"
+            disabled={full}
+            onClick={() => useAppStore.getState().update((g) => { assignGtn(g, group as "GK" | "DEF" | "MID" | "ATT", maxAge); })}
+            aria-label="Start GTN assignment"
+          >
+            {full ? "Network busy (3/3)" : "Send scouts"}
+          </Button>
+        </div>
+      </section>
+
+      <section aria-label="GTN report">
+        <h2 className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-2">Latest findings ({reports.length})</h2>
+        {reports.length === 0 ? (
+          <p className="text-[11px] text-slate-600">No reports yet. Assignments return findings every 3 weeks.</p>
+        ) : (
+          <ul className="space-y-1.5">
+            {reports.map((r) => (
+              <li key={r.playerId} className="flex items-center gap-2.5 rounded-xl border border-slate-800 bg-slate-950/40 p-2.5">
+                <span className={cn("rounded-md border px-1.5 py-0.5 text-[10px] font-bold w-11 text-center shrink-0", posBadgeClass(r.player.position))}>{r.player.position}</span>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold text-slate-100 truncate">{r.player.name}</p>
+                  <p className="text-[11px] text-slate-500">
+                    {dataset.teams.find((t) => t.id === r.player.teamId)?.shortName ?? "???"} · Age {r.player.age} · {r.player.overallRating} OVR / {r.player.potential} POT
+                  </p>
+                </div>
+                <span className="text-[10px] text-slate-600 shrink-0">Wk {r.week}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+    </div>
+  );
+}
+
+function YouthAcademyView() {
+  const game = useAppStore((s) => s.game);
+  const dataset = useAppStore((s) => s.dataset);
+  const [msg, setMsg] = useState<string | null>(null);
+  if (!game || !dataset) return null;
+
+  const prospects = game.players.filter((p) => p.age <= 19).sort((a, b) => b.potential - a.potential);
+  const week = weekOfSeason(game);
+  const tourDone = game.lastYouthTourWeek === week;
+  const tw = transferWindow(week);
+  void tw;
+
+  return (
+    <div className="space-y-3">
+      {msg && <p role="status" className="rounded-lg border border-emerald-500/40 bg-emerald-500/10 p-2.5 text-xs text-emerald-300">{msg}</p>}
+
+      <section aria-label="Youth staff" className="rounded-xl border border-slate-800 bg-slate-950/40 p-3">
+        <h2 className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-1 flex items-center gap-1.5">
+          <GraduationCap className="h-3.5 w-3.5" aria-hidden /> Youth staff ({game.youthScouts.length}/3)
+        </h2>
+        <p className="text-[11px] text-slate-500 mb-2">Scouts boost the yearly intake quality and add an extra prospect at high quality totals.</p>
+        {game.youthScouts.length > 0 && (
+          <ul className="space-y-1.5 mb-3">
+            {game.youthScouts.map((sc) => (
+              <li key={sc.id} className="flex items-center gap-2 rounded-lg border border-slate-800 bg-slate-950/60 p-2.5">
+                <Badge variant="outline" className="text-[10px] border-amber-500/40 text-amber-400 shrink-0">
+                  {YOUTH_SCOUT_TIERS.find((t) => t.quality === sc.quality)?.label}
+                </Badge>
+                <span className="text-[11px] text-slate-300 flex-1 truncate">{sc.name}</span>
+                <span className="text-[11px] text-slate-500 shrink-0">{formatMoney(sc.weeklyWage)}/w</span>
+                <Button size="sm" variant="ghost" className="h-7 text-[10px] text-rose-400" onClick={() => useAppStore.getState().update((g) => fireYouthScout(g, sc.id))} aria-label={`Release scout ${sc.name}`}>
+                  Release
+                </Button>
+              </li>
+            ))}
+          </ul>
+        )}
+        {game.youthScouts.length < 3 && (
+          <div className="flex flex-wrap gap-1.5">
+            {YOUTH_SCOUT_TIERS.map((t) => (
+              <Button
+                key={t.quality}
+                size="sm"
+                variant="outline"
+                className="h-9 border-slate-700 text-[11px]"
+                onClick={() => {
+                  const ok = useAppStore.getState().update((g) => hireYouthScout(g, t.quality));
+                  void ok;
+                  setMsg(`${t.label} hired (${formatMoney(t.wage)}/w)`);
+                }}
+                aria-label={`Hire ${t.label} for ${formatMoney(t.wage)} per week`}
+              >
+                Hire {t.label} · {formatMoney(t.wage)}/w
+              </Button>
+            ))}
+          </div>
+        )}
+      </section>
+
+      <section aria-label="Youth squad" className="rounded-xl border border-slate-800 bg-slate-950/40 p-3">
+        <h2 className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-2">Youth squad ({prospects.length})</h2>
+        {prospects.length === 0 ? (
+          <p className="text-[11px] text-slate-600">No U20 players yet. The yearly intake arrives at season end.</p>
+        ) : (
+          <ul className="space-y-1.5 max-h-72 overflow-y-auto scrollbar-thin">
+            {prospects.map((p) => (
+              <li key={p.id} className="flex items-center gap-2.5 rounded-lg border border-slate-800 bg-slate-950/60 p-2.5">
+                <span className={cn("rounded-md border px-1.5 py-0.5 text-[10px] font-bold w-11 text-center shrink-0", posBadgeClass(p.position))}>{p.position}</span>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold text-slate-100 truncate">{p.name}</p>
+                  <p className="text-[11px] text-slate-500">{p.age}y · {p.overallRating} OVR · POT {p.potential} · {formatMoney(p.salary)}/w</p>
+                </div>
+                <span className="text-[10px] text-slate-600 shrink-0">{p.seasonStats.apps} apps</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      <section aria-label="Youth tournament" className="rounded-xl border border-slate-800 bg-slate-950/40 p-3">
+        <h2 className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-1">Youth tournament (5v5 Rush)</h2>
+        <p className="text-[11px] text-slate-500 mb-2">Weekly academy event: young players gain sharpness and morale. One per week.</p>
+        <Button
+          size="sm"
+          variant="outline"
+          className="w-full h-10 border-emerald-600/50 text-emerald-400 font-bold"
+          disabled={tourDone || prospects.length < 3}
+          onClick={() => {
+            let message = "";
+            useAppStore.getState().update((g) => { message = youthTournament(g).message; });
+            setMsg(message);
+          }}
+          aria-label="Play youth tournament"
+        >
+          {tourDone ? "Played this week" : prospects.length < 3 ? "Need 3+ U20 players" : "Play the tournament"}
+        </Button>
+      </section>
     </div>
   );
 }

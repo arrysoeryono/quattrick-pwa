@@ -1,4 +1,4 @@
-import type { Dataset, Fixture, TableRow, TeamRow } from "./types";
+import type { Dataset, Fixture, GameState, TableRow, TeamRow } from "./types";
 import { mulberry32 } from "./defaultData";
 import { getFormation, positionAffinity } from "./formations";
 import type { MatchTeamConfig, Mentality, PlayerState, PositionCode } from "./types";
@@ -207,4 +207,132 @@ export function buildAiTeamConfig(dataset: Dataset, team: TeamRow, formationName
 /** Total wage bill of a squad. */
 export function wageBill(players: PlayerState[]): number {
   return players.reduce((s, p) => s + p.salary, 0);
+}
+
+/* ================= v6.0 — Quick Sim (user match without the live engine) ================= */
+
+import type { MatchRatingEntry, MatchResult } from "./types";
+
+/**
+ * Simulate the user's fixture instantly (Central > Quick Sim) and produce a
+ * MatchResult that the weekly advance pipeline can consume. Player ratings,
+ * goals, assists and stats are derived deterministically from the squad.
+ */
+export function simulateUserMatchQuick(
+  game: GameState,
+  dataset: Dataset,
+  fixture: Fixture,
+): MatchResult {
+  const userHome = fixture.homeId === game.clubId;
+  const oppId = userHome ? fixture.awayId : fixture.homeId;
+  const hs = estimateClubStrength(dataset, fixture.homeId) * 1.12;
+  const as = estimateClubStrength(dataset, fixture.awayId);
+  const diffBoost = { amateur: -3, pro: 0, legend: 3 }[game.difficulty] ?? 0;
+  const score = quickSimulateScore(
+    userHome ? hs + diffBoost * 0 : hs,
+    as + diffBoost,
+    fixture.id * 7919 + game.season + 13,
+  );
+
+  /* distribute the user's goals + assists across the starting XI */
+  const starters = game.lineup
+    .filter((id): id is number => id !== null)
+    .map((id) => game.players.find((p) => p.id === id))
+    .filter((p): p is PlayerState => Boolean(p));
+  // v6.0 — Be a Pro: the Pro always features (swap him in for the weakest non-GK starter)
+  if (game.careerMode === "player" && game.proId) {
+    const alreadyIn = starters.some((p) => p.id === game.proId);
+    const pro = game.players.find((p) => p.id === game.proId);
+    if (!alreadyIn && pro && pro.injuryWeeks === 0 && starters.length > 1) {
+      let worstIdx = -1;
+      let worstScore = Infinity;
+      for (let i = 0; i < starters.length; i++) {
+        const s = starters[i];
+        if (s.position === "GK" || s.id === pro.id) continue;
+        const score = positionAffinity(s.position, s.position) * s.overallRating;
+        if (score < worstScore) {
+          worstScore = score;
+          worstIdx = i;
+        }
+      }
+      if (worstIdx >= 0) starters[worstIdx] = pro;
+    }
+  }
+  const myGoals = userHome ? score.homeGoals : score.awayGoals;
+  const oppGoals = userHome ? score.awayGoals : score.homeGoals;
+
+  const rng = mulberry32(fixture.id * 9241 + game.season);
+  const attackers = starters.filter((p) => ["ST", "CF", "LW", "RW", "CAM", "LF", "RF"].includes(p.position));
+  const pool = attackers.length > 0 ? attackers : starters;
+
+  const goalDist = new Map<number, number>();
+  for (let i = 0; i < myGoals; i++) {
+    const scorer = pool[Math.floor(rng() * pool.length)];
+    goalDist.set(scorer.id, (goalDist.get(scorer.id) ?? 0) + 1);
+  }
+  const assistDist = new Map<number, number>();
+  const creators = starters.filter((p) => !["GK", "CB"].includes(p.position));
+  for (let i = 0; i < Math.round(myGoals * 0.7); i++) {
+    const c = creators[Math.floor(rng() * creators.length)];
+    if (c) assistDist.set(c.id, (assistDist.get(c.id) ?? 0) + 1);
+  }
+
+  const entries: MatchRatingEntry[] = starters.map((p) => {
+    const goals = goalDist.get(p.id) ?? 0;
+    const assists = assistDist.get(p.id) ?? 0;
+    let rating = 6.1 + (p.overallRating - 60) * 0.028 + (p.sharpness - 50) * 0.008 + (p.morale - 50) * 0.004;
+    rating += goals * 0.85 + assists * 0.45;
+    const won = myGoals > oppGoals;
+    const drew = myGoals === oppGoals;
+    rating += won ? 0.45 : drew ? 0.1 : -0.35;
+    if (p.position === "GK" && oppGoals === 0) rating += 0.7;
+    if (["CB", "LB", "RB", "LWB", "RWB", "CDM"].includes(p.position)) rating += oppGoals === 0 ? 0.45 : oppGoals >= 3 ? -0.4 : 0.1;
+    rating = Math.max(4.5, Math.min(9.9, rating));
+    return { playerId: p.id, rating: Math.round(rating * 10) / 10, goals, assists };
+  });
+
+  const motm = [...entries].sort((a, b) => b.rating - a.rating)[0];
+  const events: MatchResult["events"] = [
+    { minute: 0, type: "ko", teamSide: "neutral", text: "Kick off" },
+  ];
+  const oppName = dataset.teams.find((t) => t.id === oppId)?.shortName ?? "opponent";
+  for (const e of entries) {
+    const p = game.players.find((x) => x.id === e.playerId);
+    for (let g = 0; g < e.goals; g++) {
+      events.push({ minute: 5 + Math.floor(rng() * 85), type: "goal", teamSide: "home", text: `${p?.name ?? "Unknown"} ${myGoals > 0 ? "scores" : ""} vs ${oppName}` });
+    }
+  }
+  events.push({ minute: 90, type: "ft", teamSide: "neutral", text: `Full time: ${fixture.homeId === game.clubId ? score.homeGoals : score.awayGoals}-${fixture.homeId === game.clubId ? score.awayGoals : score.homeGoals}` });
+
+  const poss = Math.round(50 + (userHome ? hs - as : as - hs) * 0.9);
+  const shots = Math.max(3, Math.round(6 + myGoals * 2.4 + rng() * 5));
+  const oppShots = Math.max(2, Math.round(5 + oppGoals * 2.2 + rng() * 5));
+  const userShots = userHome ? shots : oppShots;
+  const oppSideShots = userHome ? oppShots : shots;
+
+  const injuries: number[] = [];
+  if (rng() < 0.12 && starters.length > 0) {
+    const victim = starters[Math.floor(rng() * starters.length)];
+    injuries.push(victim.id);
+  }
+
+  return {
+    fixtureId: fixture.id,
+    homeId: fixture.homeId,
+    awayId: fixture.awayId,
+    homeGoals: score.homeGoals,
+    awayGoals: score.awayGoals,
+    events,
+    ratings: entries,
+    stats: {
+      possession: [userHome ? poss : 100 - poss, userHome ? 100 - poss : poss],
+      shots: [shots, oppShots],
+      onTarget: [Math.max(1, Math.round(userShots * 0.4)), Math.max(1, Math.round(oppSideShots * 0.38))],
+      xg: [Math.round((myGoals * 0.85 + 0.4) * 10) / 10, Math.round((oppGoals * 0.85 + 0.35) * 10) / 10],
+    },
+    injuries,
+    motmPlayerId: motm?.playerId ?? null,
+    shotLog: [],
+    momentum: userHome ? 20 : -20,
+  };
 }

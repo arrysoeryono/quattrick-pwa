@@ -11,8 +11,11 @@ import type {
   Difficulty,
   Fixture,
   GameState,
+  GtnAssignment,
   InboxMessage,
+  JobOffer,
   NewsItem,
+  PlayerRow,
   PlayerState,
   PositionalAttributes,
   SocialPost,
@@ -159,7 +162,28 @@ export function runTransferWorld(game: GameState, dataset: Dataset, rng: () => n
 
   /* --- AI bid for one of the user's stars (inbox message) --- */
   const bidChance = window.deadline ? 0.22 : 0.08;
-  if (rng() < bidChance && game.players.length > 14) {
+  const listed = game.players.filter((p) => (game.transferListedIds ?? []).includes(p.id));
+  if (listed.length > 0 && rng() < (window.deadline ? 0.65 : 0.35) && !game.inbox.some((m) => m.kind === "bid" && !m.resolvedOptionId)) {
+    // transfer-listed players attract concrete bids first
+    const star = listed.sort((a, b) => b.overallRating - a.overallRating)[0];
+    const bidder = buyers[Math.floor(rng() * buyers.length)];
+    const fee = Math.round(star.marketValue * (0.92 + rng() * 0.2));
+    game.inbox.unshift({
+      id: uid(),
+      date: game.currentDate,
+      kind: "bid",
+      playerId: star.id,
+      playerName: star.name,
+      title: `Transfer bid: ${star.name}`,
+      body: `${bidder.name} have submitted a formal offer of $${(fee / 1e6).toFixed(2)}M for ${star.name} (OVR ${star.overallRating}). He is on the transfer list, so a move looks possible.`,
+      options: [
+        { id: "accept", label: `Accept $${(fee / 1e6).toFixed(1)}M` },
+        { id: "reject", label: "Reject the bid" },
+      ],
+      bidAmount: fee,
+      bidTeamId: bidder.id,
+    });
+  } else if (rng() < bidChance && game.players.length > 14) {
     const stars = [...game.players].sort((a, b) => b.overallRating - a.overallRating).slice(0, 4);
     const star = stars[Math.floor(rng() * stars.length)];
     if (star && !game.inbox.some((m) => m.kind === "bid" && !m.resolvedOptionId)) {
@@ -220,6 +244,300 @@ export function runTransferWorld(game: GameState, dataset: Dataset, rng: () => n
       });
     }
   }
+
+  /* --- v6.0 loan offers for players on the loan list (auto-resolved) --- */
+  const loanListed = game.players.filter((p) => (game.loanListedIds ?? []).includes(p.id) && p.injuryWeeks === 0);
+  if (loanListed.length > 0 && window.open && rng() < (window.deadline ? 0.7 : 0.4)) {
+    const candidate = loanListed[Math.floor(rng() * loanListed.length)];
+    const partner = buyers[Math.floor(rng() * buyers.length)];
+    loanOutPlayer(game, candidate.id, partner.id, 12);
+    pushNews(game, "transfer", `${candidate.name} joins ${partner.name} on loan`, `The ${candidate.age}-year-old ${candidate.position} heads out for 12 weeks to build match sharpness. The parent club covers part of the wage.`);
+  }
+}
+
+/* ============================================================
+ * v6.0 — Transfer list, loans, release, shortlist
+ * ============================================================ */
+
+export function toggleTransferList(game: GameState, playerId: number): void {
+  const list = game.transferListedIds ?? (game.transferListedIds = []);
+  const i = list.indexOf(playerId);
+  if (i >= 0) list.splice(i, 1);
+  else list.push(playerId);
+  // a listed player cannot also be on the loan list
+  game.loanListedIds = (game.loanListedIds ?? []).filter((id) => id !== playerId);
+}
+
+export function toggleLoanList(game: GameState, playerId: number): void {
+  const list = game.loanListedIds ?? (game.loanListedIds = []);
+  const i = list.indexOf(playerId);
+  if (i >= 0) list.splice(i, 1);
+  else list.push(playerId);
+  game.transferListedIds = (game.transferListedIds ?? []).filter((id) => id !== playerId);
+}
+
+export function toggleShortlist(game: GameState, playerId: number): void {
+  const list = game.shortlist ?? (game.shortlist = []);
+  const i = list.indexOf(playerId);
+  if (i >= 0) list.splice(i, 1);
+  else list.push(playerId);
+}
+
+/** Send one of the user's players out on loan (removes him from the squad). */
+export function loanOutPlayer(game: GameState, playerId: number, partnerTeamId: number, weeks: number): boolean {
+  const idx = game.players.findIndex((p) => p.id === playerId);
+  if (idx < 0) return false;
+  const p = game.players[idx];
+  game.players.splice(idx, 1);
+  game.lineup = game.lineup.map((id) => (id === playerId ? null : id));
+  game.loans = game.loans ?? [];
+  game.loans.push({
+    id: uid(),
+    playerId,
+    playerName: p.name,
+    position: p.position,
+    direction: "out",
+    partnerTeamId,
+    weeksLeft: weeks,
+    season: game.season,
+  });
+  game.loanListedIds = (game.loanListedIds ?? []).filter((id) => id !== playerId);
+  return true;
+}
+
+/** Bring a market player in on loan (pays a share of the wage, no fee). */
+export function loanInPlayer(game: GameState, dataset: Dataset, playerId: number): { ok: boolean; message: string } {
+  const row = dataset.players.find((p) => p.id === playerId);
+  if (!row) return { ok: false, message: "Player not found" };
+  if (row.teamId === game.clubId) return { ok: false, message: "Already your player" };
+  if ((game.loans ?? []).some((l) => l.playerId === playerId && l.direction === "in")) return { ok: false, message: "Already on loan" };
+  const wageShare = Math.round(row.salary * 0.3);
+  const currentWages = game.players.reduce((s, p) => s + p.salary, 0);
+  if (currentWages + wageShare > game.wageBudget) return { ok: false, message: "Wage budget exceeded (FFP)" };
+  if (game.players.length >= 30) return { ok: false, message: "Squad is full (max 30)" };
+  const st: PlayerState = {
+    ...row,
+    teamId: game.clubId,
+    sharpness: 60,
+    morale: 62,
+    stamina: 100,
+    form: 0,
+    injuryWeeks: 0,
+    contractYears: 0,
+    squadRole: "Rotation",
+    trainingPlan: { focus: "balanced", intensity: "normal" },
+    retrain: null,
+    seasonStats: { apps: 0, goals: 0, assists: 0, ratingSum: 0, cleanSheets: 0 },
+    careerStats: { apps: 0, goals: 0, assists: 0 },
+    devPath: null,
+    mentor: null,
+    salary: wageShare,
+  };
+  game.players.push(st);
+  game.loans = game.loans ?? [];
+  game.loans.push({
+    id: uid(),
+    playerId,
+    playerName: row.name,
+    position: row.position,
+    direction: "in",
+    partnerTeamId: row.teamId,
+    weeksLeft: 12,
+    season: game.season,
+  });
+  return { ok: true, message: `${row.name} joins on loan (12 weeks, ${Math.round((wageShare / Math.max(row.salary, 1)) * 100)}% wage)` };
+}
+
+/** Weekly loan tick: count down and return players when finished. */
+export function tickLoans(game: GameState, dataset: Dataset): void {
+  const finished: string[] = [];
+  for (const loan of game.loans ?? []) {
+    loan.weeksLeft -= 1;
+    if (loan.weeksLeft <= 0) finished.push(loan.id);
+  }
+  for (const id of finished) {
+    const loan = game.loans.find((l) => l.id === id);
+    if (!loan) continue;
+    if (loan.direction === "out") {
+      // player comes back to the user's squad
+      const row = dataset.players.find((p) => p.id === loan.playerId);
+      if (row && !game.players.some((p) => p.id === row.id)) {
+        const st: PlayerState = {
+          ...row,
+          teamId: game.clubId,
+          sharpness: 55,
+          morale: 65,
+          stamina: 100,
+          form: 0,
+          injuryWeeks: 0,
+          contractYears: Math.max(1, row.id % 3),
+          squadRole: "Rotation",
+          trainingPlan: { focus: "balanced", intensity: "normal" },
+          retrain: null,
+          seasonStats: { apps: 0, goals: 0, assists: 0, ratingSum: 0, cleanSheets: 0 },
+          careerStats: { apps: 0, goals: 0, assists: 0 },
+          devPath: null,
+          mentor: null,
+        };
+        game.players.push(st);
+      }
+      pushNews(game, "transfer", `${loan.playerName} returns from loan`, "The loan spell is complete and the player is back in the squad.");
+    } else {
+      // loan-in goes home
+      const i = game.players.findIndex((p) => p.id === loan.playerId);
+      if (i >= 0) game.players.splice(i, 1);
+      game.lineup = game.lineup.map((x) => (x === loan.playerId ? null : x));
+      pushNews(game, "transfer", `${loan.playerName} returns to parent club`, "The temporary deal has run its course.");
+    }
+  }
+  if (game.loans) game.loans = game.loans.filter((l) => l.weeksLeft > 0);
+}
+
+/** Release a player: pay a settlement, he leaves as a free agent. */
+export function releasePlayer(game: GameState, playerId: number): { ok: boolean; message: string } {
+  const idx = game.players.findIndex((p) => p.id === playerId);
+  if (idx < 0) return { ok: false, message: "Player not in squad" };
+  const p = game.players[idx];
+  const settlement = Math.round(p.salary * 26); // ~half a season of wages
+  if (game.transferBudget < settlement) return { ok: false, message: `Settlement costs ${(settlement / 1e6).toFixed(1)}M — not enough budget` };
+  game.transferBudget -= settlement;
+  game.ledger = [{ id: uid(), date: game.currentDate, week: weekOfSeason(game), label: `Released ${p.name} (settlement)`, amount: -settlement }, ...(game.ledger ?? [])].slice(0, 50);
+  game.players.splice(idx, 1);
+  game.lineup = game.lineup.map((id) => (id === playerId ? null : id));
+  game.transferListedIds = (game.transferListedIds ?? []).filter((id) => id !== playerId);
+  game.loanListedIds = (game.loanListedIds ?? []).filter((id) => id !== playerId);
+  pushNews(game, "transfer", `${p.name} released by mutual consent`, `A settlement of $${(settlement / 1e6).toFixed(2)}M was paid. The ${p.position} is now a free agent.`);
+  return { ok: true, message: `${p.name} released (settlement $${(settlement / 1e6).toFixed(2)}M)` };
+}
+
+/* ============================================================
+ * v6.0 — Global Transfer Network (GTN)
+ * ============================================================ */
+
+export const GTN_POSITION_GROUPS: { id: GtnAssignment["positionGroup"]; label: string; positions: string[] }[] = [
+  { id: "GK", label: "Goalkeepers", positions: ["GK"] },
+  { id: "DEF", label: "Defenders", positions: ["CB", "LB", "RB", "LWB", "RWB"] },
+  { id: "MID", label: "Midfielders", positions: ["CDM", "CM", "CAM", "LM", "RM"] },
+  { id: "ATT", label: "Attackers", positions: ["ST", "CF", "LW", "RW", "LF", "RF"] },
+];
+
+export const GTN_WEEKLY_COST = 60_000;
+
+export function assignGtn(game: GameState, positionGroup: GtnAssignment["positionGroup"], maxAge: number): boolean {
+  if ((game.gtn ?? []).length >= 3) return false;
+  game.gtn = game.gtn ?? [];
+  game.gtn.push({ id: uid(), positionGroup, maxAge, weeksLeft: 3 });
+  return true;
+}
+
+export function cancelGtn(game: GameState, assignmentId: string): void {
+  game.gtn = (game.gtn ?? []).filter((a) => a.id !== assignmentId);
+}
+
+/** Weekly GTN pass — resolves finished assignments into a scouting report. */
+export function tickGtn(game: GameState, dataset: Dataset, rng: () => number): number {
+  let newReports = 0;
+  for (const a of game.gtn ?? []) {
+    a.weeksLeft -= 1;
+    if (a.weeksLeft > 0) continue;
+    const group = GTN_POSITION_GROUPS.find((g) => g.id === a.positionGroup);
+    const candidates = dataset.players
+      .filter((p) => p.teamId !== game.clubId && p.teamId !== -1)
+      .filter((p) => group && group.positions.includes(p.position))
+      .filter((p) => p.age <= a.maxAge)
+      .filter((p) => !game.scoutedIds.includes(p.id))
+      .sort((x, y) => y.potential - x.potential)
+      .slice(0, 8);
+    const picks: PlayerRow[] = [];
+    for (let i = 0; i < 3 && candidates.length > 0; i++) {
+      const pick = candidates.splice(Math.floor(rng() * candidates.length), 1)[0];
+      picks.push(pick);
+      if (!game.scoutedIds.includes(pick.id)) game.scoutedIds.push(pick.id);
+      game.gtnReport = [{ playerId: pick.id, week: weekOfSeason(game) }, ...(game.gtnReport ?? [])].slice(0, 12);
+      newReports++;
+    }
+    if (picks.length > 0) {
+      const best = [...picks].sort((x, y) => y.potential - x.potential)[0];
+      pushNews(game, "transfer", `GTN report: ${group?.label} targets found`, `The network flagged ${picks.length} names, headlined by ${best.name} (${best.age}, OVR ${best.overallRating}, POT ${best.potential}). Full dossiers unlocked on the market.`);
+    }
+  }
+  if (game.gtn) game.gtn = game.gtn.filter((a) => a.weeksLeft > 0);
+  return newReports;
+}
+
+/* ============================================================
+ * v6.0 — Youth scouts & Youth Academy
+ * ============================================================ */
+
+export const YOUTH_SCOUT_TIERS: { quality: 1 | 2 | 3; label: string; wage: number }[] = [
+  { quality: 1, label: "Local Scout", wage: 8_000 },
+  { quality: 2, label: "National Scout", wage: 15_000 },
+  { quality: 3, label: "Elite Scout", wage: 25_000 },
+];
+
+const YOUTH_SCOUT_NAMES = ["P. Verhoeven", "J. Okada", "L. Marchetti", "S. Kouassi", "M. Bergström", "T. Salazar", "D. Nkemelu", "R. Halim"];
+
+export function hireYouthScout(game: GameState, quality: 1 | 2 | 3): boolean {
+  if ((game.youthScouts ?? []).length >= 3) return false;
+  const tier = YOUTH_SCOUT_TIERS.find((t) => t.quality === quality)!;
+  const name = YOUTH_SCOUT_NAMES[(game.youthScouts?.length ?? 0) * 2 + quality] ?? "Academy Scout";
+  game.youthScouts = [...(game.youthScouts ?? []), { id: uid(), name, quality, weeklyWage: tier.wage }];
+  return true;
+}
+
+export function fireYouthScout(game: GameState, scoutId: string): void {
+  game.youthScouts = (game.youthScouts ?? []).filter((s) => s.id !== scoutId);
+}
+
+/** Sum of hired youth scout quality (drives academy intake). */
+export function youthScoutQuality(game: GameState): number {
+  return (game.youthScouts ?? []).reduce((s, sc) => s + sc.quality, 0);
+}
+
+/** Simulate the academy 5v5 Rush tournament — prospects gain sharpness + morale. */
+export function youthTournament(game: GameState): { ok: boolean; message: string; mvp?: string } {
+  const week = weekOfSeason(game);
+  if ((game.lastYouthTourWeek ?? 0) === week) return { ok: false, message: "The academy side already played this week" };
+  const prospects = game.players.filter((p) => p.age <= 19);
+  if (prospects.length < 3) return { ok: false, message: "Not enough young players for a squad" };
+  game.lastYouthTourWeek = week;
+  const mvp = prospects[Math.floor(Math.random() * prospects.length)];
+  for (const p of prospects) {
+    p.sharpness = Math.min(100, p.sharpness + 12);
+    p.morale = Math.min(100, p.morale + 6);
+    p.stamina = Math.max(50, p.stamina - 10);
+  }
+  pushNews(game, "season", `Youth tournament: ${mvp.name} steals the show`, "The academy 5v5 Rush side impressed scouts. Young players gained match sharpness and confidence.");
+  pushSocial(game, { handle: "Academy Watch", tag: "@academywatch", tone: "hype", text: `${mvp.name} just ran the show at the youth tournament. The first team should take notes.` });
+  return { ok: true, message: `Tournament complete — ${mvp.name} named MVP`, mvp: mvp.name };
+}
+
+/* ============================================================
+ * v6.0 — Job offers (Office > Jobs)
+ * ============================================================ */
+
+/** Generate JobOffer objects from team ids (budgets mirror the club's own). */
+export function makeJobOffers(game: GameState, dataset: Dataset, teamIds: number[]): JobOffer[] {
+  return teamIds
+    .map((id) => dataset.teams.find((t) => t.id === id))
+    .filter((t): t is NonNullable<typeof t> => Boolean(t) && t!.id !== game.clubId)
+    .map((t) => ({
+      id: uid(),
+      teamId: t.id,
+      teamName: t.name,
+      transferBudget: t.transferBudget,
+      wageBudget: t.wageBudget,
+      objectiveTarget: objectiveForJob(t.reputation, dataset.teams.filter((x) => x.leagueId === t.leagueId).length),
+      rep: t.reputation,
+    }));
+}
+
+function objectiveForJob(reputation: number, teamsCount: number): number {
+  if (reputation >= 78) return 1;
+  if (reputation >= 72) return Math.min(3, teamsCount);
+  if (reputation >= 64) return 5;
+  if (reputation >= 58) return 8;
+  return Math.max(6, teamsCount - 2);
 }
 
 /** Resolve an inbox conversation. Returns a short outcome line for the UI. */
@@ -533,8 +851,8 @@ export function tickScouting(game: GameState): number[] {
  * v4.3 — Youth academy intake (per season, scaled by facility)
  * ============================================================ */
 
-export function academyIntake(game: GameState, dataset: Dataset, nextId: number, rng: () => number): { id: number; name: string; position: string; age: number; ovr: number; pot: number }[] {
-  const count = 2 + (rng() < 0.4 ? 1 : 0);
+export function academyIntake(game: GameState, dataset: Dataset, nextId: number, rng: () => number, scoutQuality = 0): { id: number; name: string; position: string; age: number; ovr: number; pot: number }[] {
+  const count = 2 + (rng() < 0.4 ? 1 : 0) + (scoutQuality >= 5 ? 1 : 0);
   const out: { id: number; name: string; position: string; age: number; ovr: number; pot: number }[] = [];
   const positions = ["CB", "LB", "RB", "CDM", "CM", "CAM", "LW", "RW", "ST", "CF", "GK"];
   const firstNames = ["Kai", "Noel", "Rui", "Milo", "Ezra", "Tye", "Idris", "Louie", "Sacha", "Rasmus", "Diego", "Matteo"];
@@ -542,7 +860,7 @@ export function academyIntake(game: GameState, dataset: Dataset, nextId: number,
   for (let i = 0; i < count; i++) {
     const pos = positions[Math.floor(rng() * positions.length)] as PlayerState["position"];
     const age = 16 + Math.floor(rng() * 2);
-    const base = 44 + Math.floor(rng() * 12) + game.facilityLevel * 2;
+    const base = 44 + Math.floor(rng() * 12) + game.facilityLevel * 2 + scoutQuality * 2;
     // keepers carry the dedicated GK attribute set
     const attrs: PositionalAttributes = pos === "GK"
       ? {
@@ -563,7 +881,7 @@ export function academyIntake(game: GameState, dataset: Dataset, nextId: number,
         };
     const { ovr, pot } = (() => {
       const o = computeOverall(attrs, pos);
-      return { ovr: o, pot: Math.min(92, o + 14 + Math.floor(rng() * 14) + game.facilityLevel * 2) };
+      return { ovr: o, pot: Math.min(92, o + 14 + Math.floor(rng() * 14) + game.facilityLevel * 2 + scoutQuality * 2) };
     })();
     const id = nextId + i;
     const name = `${firstNames[Math.floor(rng() * firstNames.length)]} ${lastNames[Math.floor(rng() * lastNames.length)]}`;

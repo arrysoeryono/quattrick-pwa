@@ -97,6 +97,8 @@ export interface RetrainState {
 
 export interface StaffState {
   coachLevel: "Novice" | "Accomplished" | "Expert";
+  /** v6.0 — per-line specialist coaches (0-3 each), Office > Staff. */
+  lineCoaches?: { gk: number; def: number; mid: number; att: number };
 }
 
 export interface SeasonStats {
@@ -345,6 +347,144 @@ export interface SeasonObjective {
   cupTarget: "win" | "final" | "none";
 }
 
+/* ================= v6.0 — FC Career Mode expansion ================= */
+
+export type CareerMode = "manager" | "player";
+
+export type Currency = "USD" | "EUR" | "GBP" | "IDR";
+
+export interface GameSettings {
+  currency: Currency;
+  /** Real-feel length of each live half (minutes) — scales live sim speed. */
+  halfLengthMin: number;
+}
+
+/** v6.0 — single row of the club finance ledger. */
+export interface LedgerEntry {
+  id: string;
+  date: string;
+  week: number;
+  label: string;
+  amount: number; // + income, - expense
+}
+
+/** v6.0 — a loan, in either direction. */
+export interface LoanRecord {
+  id: string;
+  playerId: number;
+  playerName: string;
+  position: PositionCode;
+  direction: "out" | "in";
+  partnerTeamId: number;
+  weeksLeft: number;
+  season: number;
+}
+
+/** v6.0 — a job offer from another club (or post-sacking lifeline). */
+export interface JobOffer {
+  id: string;
+  teamId: number;
+  teamName: string;
+  transferBudget: number;
+  wageBudget: number;
+  objectiveTarget: number;
+  rep: number;
+}
+
+/** v6.0 — one press-conference question with answer options. */
+export interface PressOption {
+  id: string;
+  label: string;
+  morale: number; // squad-wide morale delta
+  board: number; // board confidence delta
+  tone: "confident" | "humble" | "neutral" | "defiant";
+}
+
+export interface PressQuestion {
+  id: string;
+  question: string;
+  options: PressOption[];
+}
+
+export interface PressSession {
+  id: string;
+  week: number;
+  fixtureId: number;
+  title: string;
+  questions: PressQuestion[];
+  answered: string[]; // question ids already answered
+}
+
+/** v6.0 — aggregated league-wide player statistics board. */
+export interface LeaguePlayerStat {
+  goals: number;
+  assists: number;
+  cleanSheets: number;
+  yellow: number;
+  red: number;
+}
+
+/** v6.0 — Team of the Week entry. */
+export interface TotwEntry {
+  playerId: number;
+  playerName: string;
+  teamId: number;
+  position: string;
+  rating: number;
+  goals: number;
+  assists: number;
+  motm: boolean;
+}
+
+/** v6.0 — Global Transfer Network assignment. */
+export interface GtnAssignment {
+  id: string;
+  positionGroup: "GK" | "DEF" | "MID" | "ATT";
+  maxAge: number;
+  weeksLeft: number;
+}
+
+/** v6.0 — youth scout staff member. */
+export interface YouthScout {
+  id: string;
+  name: string;
+  quality: 1 | 2 | 3; // Local / National / Elite
+  weeklyWage: number;
+}
+
+/** v6.0 — Pro (Player Career) objectives. */
+export interface ProObjective {
+  id: string;
+  label: string;
+  kind: "goals" | "assists" | "apps" | "avgRating" | "cleanSheets";
+  target: number;
+  current: number;
+  reward: number; // skill points
+  done: boolean;
+}
+
+/** v6.0 — Player Career personal state. */
+export interface ProState {
+  playerId: number;
+  wallet: number;
+  skillPoints: number;
+  personality: { maverick: number; virtuoso: number; heartbeat: number };
+  managerTrust: number; // 0-100
+  objectives: ProObjective[];
+  agentTargetClubId: number | null;
+  items: string[]; // purchased lifestyle item ids
+  pendingDecision: ProDecision | null;
+  lastMatchRating: number | null;
+}
+
+/** v6.0 — out-of-pitch random event for the Pro. */
+export interface ProDecision {
+  id: string;
+  title: string;
+  body: string;
+  options: { id: string; label: string; maverick: number; virtuoso: number; heartbeat: number; wallet: number }[];
+}
+
 /** Full serialized save — stored in Dexie + Neon JSONB. */
 export interface GameState {
   version: number;
@@ -387,6 +527,27 @@ export interface GameState {
   tacticPresets: TacticPreset[]; // max 6
   teamTraining: TeamTrainingPlan;
   preMatchDrills: PreMatchDrillResult | null;
+
+  /* ---- v6.0 FC Career Mode ---- */
+  careerMode?: CareerMode; // default "manager" (legacy saves)
+  shortlist: number[]; // market player ids pinned by the manager
+  transferListedIds: number[]; // squad players on the transfer list
+  loanListedIds: number[]; // squad players available for loan out
+  loans: LoanRecord[]; // active loans (in + out)
+  offers: JobOffer[]; // pending job offers from other clubs
+  ledger: LedgerEntry[]; // recent finance movements (newest first)
+  leagueBoard: Record<string, LeaguePlayerStat>; // league-wide stats, keyed by player id
+  totw: { week: number; entries: TotwEntry[] } | null; // latest Team of the Week
+  press: PressSession | null; // active press conference awaiting answers
+  pressDoneWeeks: number[]; // weeks already covered by a press conference
+  gtn: GtnAssignment[]; // active scouting network assignments (max 3)
+  gtnReport: { playerId: number; week: number }[]; // latest GTN findings (max 12)
+  youthScouts: YouthScout[]; // hired youth academy staff (max 3)
+  lastYouthTourWeek: number; // youth tournament weekly cooldown
+  settings: GameSettings;
+  /* ---- v6.0 Player Career (Be a Pro) ---- */
+  proId?: number | null;
+  pro?: ProState | null;
 }
 
 export interface SaveRecord {
@@ -426,7 +587,7 @@ export interface LiveMatchSnapshot {
 /** v4.9 — EA FC-derived profile sent into the match engine (see lib/game/fc.ts). */
 export interface MatchPlayerFc {
   /** derived in-game stats (FC specifics); absent for keepers */
-  stats?: Record<string, number>;
+  stats?: Record<string, number> | null;
   weakFoot?: number; // 1-5
   skillMoves?: number; // 1-5
   acceleRATE?: string; // Explosive / Controlled / Lengthy
