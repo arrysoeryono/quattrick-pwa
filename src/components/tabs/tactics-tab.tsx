@@ -22,7 +22,7 @@ import {
 import { buildFcProfile } from "@/lib/game/fc";
 import { AdvancedPitch, affinityRing } from "@/components/advanced-pitch";
 import { cn } from "@/lib/utils";
-import { ClipboardList, Dumbbell, Repeat, Save, Sparkles, Trash2, Wand2 } from "lucide-react";
+import { ClipboardList, Dumbbell, RefreshCw, Repeat, Save, Sparkles, Trash2, Wand2 } from "lucide-react";
 import type { PlayerState, SetPieceAssignments, SlotRole } from "@/lib/game/types";
 
 const CATEGORY_TONE: Record<string, string> = {
@@ -232,22 +232,38 @@ export function TacticsTab() {
     });
   };
 
+  const snapshotTactics = (g: NonNullable<typeof game>) => ({
+    formationName: g.tactics.formationName,
+    mentality: g.tactics.mentality,
+    gamePlan: g.tactics.gamePlan,
+    sliders: { ...g.tactics.sliders },
+    lineup: [...g.lineup],
+    roles: { ...(g.tactics.roles ?? {}) },
+    instructions: Object.fromEntries(Object.entries(g.tactics.instructions ?? {}).map(([k, v]) => [k, { ...v }])),
+    setPieces: { ...(g.tactics.setPieces ?? { captain: null, penalty: null, freeKick: null, cornerLeft: null, cornerRight: null }) },
+  });
+
   const savePreset = () => {
     update((g) => {
       if (g.tacticPresets.length >= 6) return;
       g.tacticPresets = [...g.tacticPresets, {
         id: Math.random().toString(36).slice(2, 10),
         name: presetName.trim() || `Preset ${g.tacticPresets.length + 1}`,
-        formationName: g.tactics.formationName,
-        mentality: g.tactics.mentality,
-        gamePlan: g.tactics.gamePlan,
-        sliders: { ...g.tactics.sliders },
-        lineup: [...g.lineup],
-        roles: { ...(g.tactics.roles ?? {}) },
+        ...snapshotTactics(g),
       }];
     });
     setPresetName("");
     setPresetDialog(false);
+  };
+
+  /** v5.1 — overwrite an existing preset with the current tactic, lineup,
+   *  FC IQ roles, instructions and set pieces. */
+  const updatePreset = (id: string) => {
+    update((g) => {
+      const idx = g.tacticPresets.findIndex((p) => p.id === id);
+      if (idx === -1) return;
+      g.tacticPresets = g.tacticPresets.map((p, i) => (i === idx ? { ...p, ...snapshotTactics(g) } : p));
+    });
   };
 
   const applyPreset = (id: string) => {
@@ -258,7 +274,11 @@ export function TacticsTab() {
       g.tactics.mentality = preset.mentality;
       g.tactics.gamePlan = preset.gamePlan;
       g.tactics.sliders = { ...preset.sliders };
-      g.tactics.instructions = {};
+      // v5.1 — restore saved instructions (legacy presets fall back to none)
+      g.tactics.instructions = Object.fromEntries(
+        Object.entries(preset.instructions ?? {}).map(([k, v]) => [k, { ...v }]),
+      );
+      if (preset.setPieces) g.tactics.setPieces = { ...preset.setPieces };
       g.tactics.roles = { ...(preset.roles ?? {}) };
       // restore the saved lineup, dropping players who left the club, then fill gaps
       const squadIds = new Set(g.players.map((p) => p.id));
@@ -508,34 +528,54 @@ export function TacticsTab() {
         </div>
         {game.tacticPresets.length === 0 ? (
           <p className="text-[11px] text-slate-600 mb-2">
-            Save up to 6 complete tactics — formation, starting XI, game plan and sliders — then swap them in one tap.
+            Save up to 6 complete tactics — formation, starting XI, game plan, sliders, FC IQ roles, instructions and set pieces — then swap them in one tap.
           </p>
         ) : (
           <div className="grid grid-cols-2 gap-1.5 mb-2">
-            {game.tacticPresets.map((preset) => (
-              <div key={preset.id} className="rounded-lg border border-slate-800 bg-slate-950/60 p-2">
-                <p className="text-xs font-bold text-slate-200 truncate">{preset.name}</p>
-                <p className="text-[10px] text-slate-500 truncate">{preset.formationName} · {preset.mentality}</p>
-                <div className="flex items-center gap-1 mt-1.5">
-                  <button
-                    type="button"
-                    onClick={() => applyPreset(preset.id)}
-                    className="flex-1 min-h-[28px] rounded-md border border-emerald-500/50 bg-emerald-500/10 text-[10px] font-bold text-emerald-400 hover:bg-emerald-500/20 transition-colors"
-                    aria-label={`Apply preset ${preset.name}`}
-                  >
-                    Apply
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => deletePreset(preset.id)}
-                    className="flex h-7 w-7 items-center justify-center rounded-md border border-rose-500/40 text-rose-400 hover:bg-rose-500/10 transition-colors"
-                    aria-label={`Delete preset ${preset.name}`}
-                  >
-                    <Trash2 className="h-3 w-3" aria-hidden />
-                  </button>
+            {game.tacticPresets.map((preset) => {
+              const roleCount = Object.keys(preset.roles ?? {}).length;
+              const instrCount = Object.values(preset.instructions ?? {}).filter((i) => i.att !== "none" || i.def !== "none").length;
+              return (
+                <div key={preset.id} className="rounded-lg border border-slate-800 bg-slate-950/60 p-2">
+                  <p className="text-xs font-bold text-slate-200 truncate">{preset.name}</p>
+                  <p className="text-[10px] text-slate-500 truncate">{preset.formationName} · {preset.mentality}</p>
+                  {(roleCount > 0 || instrCount > 0) && (
+                    <p className="text-[9px] text-slate-600 mt-0.5 truncate">
+                      {roleCount > 0 && `${roleCount} roles`}
+                      {roleCount > 0 && instrCount > 0 && " · "}
+                      {instrCount > 0 && `${instrCount} instructions`}
+                    </p>
+                  )}
+                  <div className="flex items-center gap-1 mt-1.5">
+                    <button
+                      type="button"
+                      onClick={() => applyPreset(preset.id)}
+                      className="flex-1 min-h-[28px] rounded-md border border-emerald-500/50 bg-emerald-500/10 text-[10px] font-bold text-emerald-400 hover:bg-emerald-500/20 transition-colors"
+                      aria-label={`Apply preset ${preset.name}`}
+                    >
+                      Apply
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => updatePreset(preset.id)}
+                      className="flex h-7 w-7 items-center justify-center rounded-md border border-sky-500/40 text-sky-400 hover:bg-sky-500/10 transition-colors"
+                      aria-label={`Overwrite preset ${preset.name} with current tactic`}
+                      title="Overwrite this preset with the current tactic, lineup, roles, instructions and set pieces"
+                    >
+                      <RefreshCw className="h-3 w-3" aria-hidden />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => deletePreset(preset.id)}
+                      className="flex h-7 w-7 items-center justify-center rounded-md border border-rose-500/40 text-rose-400 hover:bg-rose-500/10 transition-colors"
+                      aria-label={`Delete preset ${preset.name}`}
+                    >
+                      <Trash2 className="h-3 w-3" aria-hidden />
+                    </button>
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
         <Button
@@ -583,7 +623,7 @@ export function TacticsTab() {
           <DialogHeader>
             <DialogTitle className="text-left">Save tactic preset</DialogTitle>
             <DialogDescription className="text-left">
-              Snapshots the current formation, starting XI, game plan and sliders. {6 - game.tacticPresets.length} slot{6 - game.tacticPresets.length === 1 ? "" : "s"} left.
+              Snapshots the current formation, starting XI, game plan, sliders, FC IQ roles, instructions and set pieces. {6 - game.tacticPresets.length} slot{6 - game.tacticPresets.length === 1 ? "" : "s"} left.
             </DialogDescription>
           </DialogHeader>
           <input

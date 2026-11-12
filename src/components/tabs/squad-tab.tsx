@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAppStore } from "@/lib/store/gameStore";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
 import { PlayerDetailBody, PlayerClubActions } from "@/components/player-detail";
@@ -12,7 +13,10 @@ import { TacticsTab } from "@/components/tabs/tactics-tab";
 import { cn } from "@/lib/utils";
 import { posBadgeClass, ratingColor, formatMoney } from "@/lib/format";
 import { ALL_POSITIONS, type TrainingFocus } from "@/lib/game/types";
-import { ChevronLeft, ChevronRight, Cross, Filter, HeartPulse, ListChecks, Search, Settings2, Users, X } from "lucide-react";
+import { assumedMinutes, estimateWeeklyXp, growthMultipliers, projectGrowth } from "@/lib/game/devProjection";
+import { coachMultiplier } from "@/lib/game/advance";
+import { GK_ATTR_LABELS } from "@/lib/game/attributes";
+import { ChevronLeft, ChevronRight, Cross, Filter, HeartPulse, ListChecks, Search, Settings2, TrendingUp, Users, X } from "lucide-react";
 
 type GroupFilter = "ALL" | "GK" | "DEF" | "MID" | "ATT";
 type SortKey = "ovr" | "pot" | "age" | "form" | "value" | "wage";
@@ -25,20 +29,6 @@ const GROUPS: Record<Exclude<GroupFilter, "ALL">, string[]> = {
 };
 
 type SquadSubView = "hub" | "tactics" | "development" | "training" | "injuries";
-
-const FOCUS_SHORT: Record<TrainingFocus, string> = {
-  balanced: "Balanced",
-  attacking: "Attacking",
-  defensive: "Defensive",
-  technical: "Technical",
-  pace: "Pace",
-  shooting: "Shooting",
-  "shot-stopping": "Shot Stop",
-  handling: "Handling",
-  positioning: "Positioning",
-  distribution: "Distribution",
-  agility: "Agility",
-};
 
 /** v6.0 — FC-style Squad section with sub-screens (FC 25 Squad tab). */
 export function SquadTab() {
@@ -435,42 +425,278 @@ function SquadHub() {
 
 function DevelopmentView() {
   const game = useAppStore((s) => s.game);
+  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [horizon, setHorizon] = useState<8 | 16 | 24>(16);
+  const devScrollRef = useRef<HTMLDivElement | null>(null);
+  const selected = selectedId !== null && game ? game.players.find((p) => p.id === selectedId) ?? null : null;
+
+  const devList = useMemo(
+    () => (game ? [...game.players].sort((a, b) => b.potential - a.potential) : []),
+    [game],
+  );
+  const selectedIndex = selectedId !== null ? devList.findIndex((p) => p.id === selectedId) : -1;
+  const canStep = devList.length > 1 && selectedIndex !== -1;
+
+  const stepDev = useCallback(
+    (delta: number) => {
+      if (!canStep) return;
+      const next = devList[(selectedIndex + delta + devList.length) % devList.length];
+      setSelectedId(next.id);
+      devScrollRef.current?.scrollTo({ top: 0 });
+    },
+    [canStep, devList, selectedIndex],
+  );
+
+  useEffect(() => {
+    if (!canStep) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "ArrowRight") {
+        e.preventDefault();
+        stepDev(1);
+      } else if (e.key === "ArrowLeft") {
+        e.preventDefault();
+        stepDev(-1);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [canStep, stepDev]);
+
   if (!game) return null;
-  const list = [...game.players].sort((a, b) => b.potential - a.potential);
+
   return (
     <div className="space-y-2">
       <p className="text-[11px] text-slate-500">
-        Individual development plans. Edit focus and intensity in each player profile (Squad Hub).
+        Development centre. Tap a player to inspect his growth outlook, simulate the
+        season under the current plan and tune focus, intensity, conversion and mentoring.
       </p>
-      {list.map((p) => (
-        <div key={p.id} className="rounded-xl border border-slate-800 bg-slate-950/40 p-3">
-          <div className="flex items-center gap-2">
-            <Badge variant="outline" className={cn("text-[10px] font-bold", posBadgeClass(p.position))}>{p.position}</Badge>
-            <p className="text-xs font-bold text-slate-200 truncate flex-1">{p.name}</p>
-            <span className="text-[10px] text-slate-500 shrink-0">{p.overallRating} OVR · {p.potential} POT</span>
-          </div>
-          <div className="mt-2 flex flex-wrap gap-1.5">
-            <Badge variant="outline" className="text-[10px] border-slate-700 text-slate-300">
-              {FOCUS_SHORT[p.trainingPlan.focus]} · {p.trainingPlan.intensity}
-            </Badge>
-            {p.devPath && (
-              <Badge variant="outline" className="text-[10px] border-teal-600/40 text-teal-300">
-                {p.devPath.replace("-", " ")}
-              </Badge>
-            )}
-            {p.retrain && (
-              <Badge variant="outline" className="text-[10px] border-amber-500/40 text-amber-400">
-                Retraining to {p.retrain.target} · {p.retrain.weeksLeft}w left
-              </Badge>
-            )}
-            {p.mentor && (
-              <Badge variant="outline" className="text-[10px] border-emerald-600/40 text-emerald-400">
-                Mentored · {p.mentor.weeksLeft}w left
-              </Badge>
-            )}
-          </div>
-        </div>
-      ))}
+      <ul className="space-y-1.5 max-h-[26rem] overflow-y-auto scrollbar-thin" aria-label="Development list">
+        {devList.map((p) => {
+          const gap = p.potential - p.overallRating;
+          const minutes = p.id === selectedId ? 90 : game.lineup.includes(p.id) ? 90 : 25;
+          const xp = estimateWeeklyXp(p, minutes, coachMultiplier(game.staff?.coachLevel));
+          return (
+            <li key={p.id}>
+              <button
+                type="button"
+                onClick={() => setSelectedId(p.id)}
+                className="w-full rounded-xl border border-slate-800 bg-slate-950/40 p-2.5 text-left hover:border-slate-700 transition-colors"
+                aria-label={`Development plan for ${p.name}, ${p.overallRating} of ${p.potential} potential`}
+              >
+                <div className="flex items-center gap-2">
+                  <span className={cn("rounded-md border px-1.5 py-0.5 text-[10px] font-bold w-11 text-center shrink-0", posBadgeClass(p.position))}>
+                    {p.position}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-semibold text-slate-100 truncate">{p.name}</p>
+                    <p className="text-[11px] text-slate-500">
+                      Age {p.age} · {xp > 0 ? `~${xp.toFixed(1)} XP/wk` : "no growth left"}
+                      {p.injuryWeeks > 0 && <span className="text-rose-400"> · injured {p.injuryWeeks}w</span>}
+                    </p>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <p className="text-sm font-black text-slate-100 leading-none">
+                      {p.overallRating} <span className="text-[10px] text-slate-500">→ {p.potential}</span>
+                    </p>
+                    <p className={cn("text-[10px] font-semibold", gap > 6 ? "text-emerald-400" : gap > 0 ? "text-amber-400" : "text-slate-600")}>
+                      {gap > 0 ? `${gap} to go` : "at ceiling"}
+                    </p>
+                  </div>
+                </div>
+                <Progress
+                  value={(p.overallRating / Math.max(p.potential, 1)) * 100}
+                  className="mt-2 h-1"
+                  aria-label={`Progress to potential for ${p.name}`}
+                />
+                {(p.devPath || p.mentor || p.retrain) && (
+                  <div className="mt-1.5 flex flex-wrap gap-1">
+                    {p.devPath && (
+                      <Badge variant="outline" className="text-[9px] border-teal-600/40 text-teal-300">
+                        {p.devPath.replace("-", " ")}
+                      </Badge>
+                    )}
+                    {p.mentor && (
+                      <Badge variant="outline" className="text-[9px] border-sky-500/40 text-sky-400">
+                        mentored {p.mentor.weeksLeft}w
+                      </Badge>
+                    )}
+                    {p.retrain && (
+                      <Badge variant="outline" className="text-[9px] border-amber-500/40 text-amber-400">
+                        →{p.retrain.target} {p.retrain.weeksLeft}w
+                      </Badge>
+                    )}
+                  </div>
+                )}
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+
+      <Sheet open={selected !== null} onOpenChange={(o) => !o && setSelectedId(null)}>
+        <SheetContent
+          side="bottom"
+          className="max-h-[min(90dvh,90vh)] overflow-y-auto overscroll-contain scrollbar-thin touch-scroll rounded-t-2xl border-slate-800 bg-slate-900 p-0"
+          ref={devScrollRef}
+        >
+          {selected && (() => {
+            const coachQ = coachMultiplier(game.staff?.coachLevel);
+            const inLineup = game.lineup.includes(selected.id);
+            const minutes = assumedMinutes(selected, inLineup);
+            const mults = growthMultipliers(selected, minutes, coachQ);
+            const xp = estimateWeeklyXp(selected, minutes, coachQ);
+            const projection = projectGrowth(selected, horizon, {
+              minutes,
+              coachQ,
+              mentor: selected.mentor ? game.players.find((m) => m.id === selected.mentor!.mentorId) ?? null : null,
+            });
+            const gainLabel = (attr: string) =>
+              attr in GK_ATTR_LABELS ? GK_ATTR_LABELS[attr as keyof typeof GK_ATTR_LABELS] : attr.charAt(0).toUpperCase() + attr.slice(1);
+            return (
+              <>
+                <SheetHeader className="px-4 pt-3 pb-2 border-b border-slate-800">
+                  {canStep && (
+                    <div role="group" aria-label="Player navigation" className="mb-2 flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => stepDev(-1)}
+                        aria-label={`Previous player (${devList[(selectedIndex - 1 + devList.length) % devList.length].name})`}
+                        className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-slate-800 bg-slate-950/60 text-slate-300 transition-colors hover:border-slate-600 hover:text-slate-100 active:bg-slate-800"
+                      >
+                        <ChevronLeft className="h-5 w-5" aria-hidden />
+                      </button>
+                      <div className="flex min-w-0 flex-1 flex-col items-center justify-center rounded-lg border border-slate-800 bg-slate-950/40 px-2 py-1">
+                        <p className="text-[9px] font-bold uppercase tracking-wider text-slate-500">Browse development</p>
+                        <p className="text-xs font-black tabular-nums text-slate-200">{selectedIndex + 1} / {devList.length}</p>
+                        <p className="hidden text-[9px] text-slate-600 sm:block">Swipe or use ← → keys</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => stepDev(1)}
+                        aria-label={`Next player (${devList[(selectedIndex + 1) % devList.length].name})`}
+                        className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-slate-800 bg-slate-950/60 text-slate-300 transition-colors hover:border-slate-600 hover:text-slate-100 active:bg-slate-800"
+                      >
+                        <ChevronRight className="h-5 w-5" aria-hidden />
+                      </button>
+                    </div>
+                  )}
+                  <div className="flex items-center gap-2">
+                    <Badge variant="outline" className={cn("text-[10px] font-bold", posBadgeClass(selected.position))}>
+                      {selected.position}
+                    </Badge>
+                    <Badge variant="outline" className="text-[10px] border-slate-700 text-slate-400">Age {selected.age}</Badge>
+                    {selected.injuryWeeks > 0 && (
+                      <Badge variant="outline" className="text-[10px] border-rose-500/40 text-rose-400">Injured {selected.injuryWeeks}w</Badge>
+                    )}
+                  </div>
+                  <SheetTitle className="text-left text-lg">{selected.name}</SheetTitle>
+                  <SheetDescription className="text-left">Development centre · weekly growth engine</SheetDescription>
+                </SheetHeader>
+
+                <div className="p-4 space-y-4">
+                  {/* growth outlook */}
+                  <section aria-label="Growth outlook" className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
+                    <div className="flex items-end justify-between">
+                      <div>
+                        <p className="text-[10px] uppercase tracking-wider text-slate-500">Overall</p>
+                        <p className="text-2xl font-black text-slate-50 leading-none">{selected.overallRating}</p>
+                      </div>
+                      <div className="text-center">
+                        <p className="text-[10px] uppercase tracking-wider text-slate-500">Gap</p>
+                        <p className={cn("text-lg font-black leading-none", selected.potential - selected.overallRating > 0 ? "text-emerald-400" : "text-slate-600")}>
+                          +{Math.max(0, selected.potential - selected.overallRating)}
+                        </p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-[10px] uppercase tracking-wider text-slate-500">Potential</p>
+                        <p className="text-2xl font-black text-emerald-400 leading-none">{selected.potential}</p>
+                      </div>
+                    </div>
+                    <Progress
+                      value={(selected.overallRating / Math.max(selected.potential, 1)) * 100}
+                      className="mt-2.5 h-1.5"
+                      aria-label="Progress toward potential"
+                    />
+                    <p className="mt-1.5 text-[10px] text-slate-500">
+                      {xp > 0
+                        ? <>Currently earning <span className="font-bold text-slate-300">~{xp.toFixed(1)} XP</span> per week{inLineup ? " (starting XI minutes)" : " (assumed squad minutes — play him to grow faster)"}.</>
+                        : "At his potential ceiling — no further growth. Dynamic potential may shift at season end."}
+                    </p>
+                    <div className="mt-2 flex flex-wrap gap-1" aria-label="Weekly XP multipliers">
+                      {mults.map((m) => (
+                        <span
+                          key={m.key}
+                          className={cn(
+                            "rounded-md border px-1.5 py-0.5 text-[9px] font-bold",
+                            m.tone === "good" ? "border-emerald-500/40 text-emerald-400" : m.tone === "bad" ? "border-rose-500/40 text-rose-400" : "border-slate-700 text-slate-400",
+                          )}
+                          title={`×${m.value.toFixed(2)} weekly XP`}
+                        >
+                          {m.label} ×{m.value.toFixed(2)}
+                        </span>
+                      ))}
+                    </div>
+                  </section>
+
+                  {/* season projection */}
+                  <section aria-label="Growth projection" className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
+                    <div className="flex items-center justify-between">
+                      <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
+                        <TrendingUp className="h-3.5 w-3.5 text-emerald-400" aria-hidden /> Season projection
+                      </p>
+                      <div className="flex gap-1" role="group" aria-label="Projection horizon">
+                        {([8, 16, 24] as const).map((w) => (
+                          <button
+                            key={w}
+                            type="button"
+                            onClick={() => setHorizon(w)}
+                            aria-pressed={horizon === w}
+                            className={cn(
+                              "min-h-[30px] rounded-lg border px-2 text-[10px] font-bold transition-colors",
+                              horizon === w ? "border-emerald-500/60 bg-emerald-500/10 text-emerald-400" : "border-slate-800 bg-slate-950/40 text-slate-400 hover:border-slate-700",
+                            )}
+                          >
+                            {w}w
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="mt-2 flex items-baseline gap-2">
+                      <p className="text-lg font-black text-slate-100">{projection.startOvr}</p>
+                      <span className="text-xs text-slate-500">→</span>
+                      <p className={cn("text-lg font-black", projection.projectedOvr > projection.startOvr ? "text-emerald-400" : "text-slate-400")}>
+                        {projection.projectedOvr}
+                      </p>
+                      <span className="text-[10px] text-slate-500">
+                        in {horizon} weeks{projection.position !== selected.position ? ` · converts to ${projection.position}` : ""}
+                      </span>
+                    </div>
+                    {projection.gains.length > 0 ? (
+                      <div className="mt-1.5 flex flex-wrap gap-1">
+                        {projection.gains.map((g) => (
+                          <span key={g.attr} className="rounded-md bg-emerald-500/10 border border-emerald-500/30 px-1.5 py-0.5 text-[9px] font-bold text-emerald-300">
+                            {gainLabel(g.attr)} +{g.delta}
+                          </span>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="mt-1 text-[10px] text-slate-600">
+                        No growth projected — raise sharpness, play minutes, or increase training intensity.
+                      </p>
+                    )}
+                    <p className="mt-1.5 text-[9px] text-slate-600">
+                      Deterministic simulation of the real growth engine at {minutes} min/wk. Change the plan below and the projection updates.
+                    </p>
+                  </section>
+
+                  <Separator className="bg-slate-800" />
+                  <DevelopmentPanel player={selected} />
+                </div>
+              </>
+            );
+          })()}
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }

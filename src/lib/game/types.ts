@@ -246,6 +246,8 @@ export interface TacticPreset {
   sliders: TacticSliders;
   lineup: (number | null)[]; // aligned to the preset's formation slots
   roles?: Record<string, SlotRole>; // v5.0 FC IQ role+focus per slot index
+  instructions?: Record<string, PlayerInstruction>; // v5.1 per-slot att/def instructions
+  setPieces?: SetPieceAssignments; // v5.1 captain + dead-ball takers
 }
 
 /** v4.7 — team-level weekly training balance.
