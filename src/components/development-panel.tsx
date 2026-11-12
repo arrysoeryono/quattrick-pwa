@@ -26,16 +26,23 @@ import {
   computePlayStyles,
   devPathsFor,
   eligibleRetrainTargets,
+  keyAttributes,
   startRetrain,
 } from "@/lib/game/development";
 import { getFormation } from "@/lib/game/formations";
 import { effectiveOvr } from "@/lib/game/tactics";
-import { GK_ATTR_LABELS, isGKAttributes } from "@/lib/game/attributes";
+import {
+  GK_ATTR_KEYS,
+  GK_ATTR_LABELS,
+  OUTFIELD_ATTR_KEYS,
+  OUTFIELD_ATTR_LABELS,
+  isGKAttributes,
+} from "@/lib/game/attributes";
 import { cn } from "@/lib/utils";
-import { Dumbbell, GraduationCap, GitBranch, Repeat, Star, Users } from "lucide-react";
+import { Dumbbell, GraduationCap, GitBranch, Repeat, Star, Target, TrendingUp, Users } from "lucide-react";
 import type { PlayerState, TrainingFocus, TrainingIntensity } from "@/lib/game/types";
 
-const FOCUS_LABEL: Record<TrainingFocus, string> = {
+export const FOCUS_LABEL: Record<TrainingFocus, string> = {
   balanced: "Balanced",
   attacking: "Attacking",
   defensive: "Defensive",
@@ -159,6 +166,9 @@ export function DevelopmentPanel({ player }: { player: PlayerState }) {
           </p>
         )}
       </section>
+
+      {/* v5.2 attribute breakdown — value bars, key-attr stars, focus targets */}
+      <AttributeBreakdown player={player} activeFocus={activeFocus} />
 
       {/* v4.3 evolution path */}
       {paths.length > 0 && (
@@ -358,5 +368,56 @@ export function DevelopmentPanel({ player }: { player: PlayerState }) {
         </p>
       </section>
     </div>
+  );
+}
+
+/** v5.2 — full attribute breakdown: value bar per attribute, a star for the
+ *  position's key attributes and a target for whatever the current training
+ *  focus biases growth toward (70/30 pools). */
+function AttributeBreakdown({ player, activeFocus }: { player: PlayerState; activeFocus: TrainingFocus }) {
+  const isGK = isGKAttributes(player.attributes);
+  const attrs = player.attributes as unknown as Record<string, number>;
+  const entries = (isGK ? GK_ATTR_KEYS : OUTFIELD_ATTR_KEYS).map((key) => ({
+    key,
+    label: isGK ? GK_ATTR_LABELS[key as keyof typeof GK_ATTR_LABELS] : OUTFIELD_ATTR_LABELS[key as keyof typeof OUTFIELD_ATTR_LABELS],
+    value: attrs[key] ?? 0,
+  }));
+  const keys = new Set<string>(keyAttributes(player.position));
+  const pool = (isGK ? GK_FOCUS_POOL[activeFocus] : FOCUS_POOL[activeFocus]) ?? [];
+  const focusTargets = new Set<string>(pool);
+  const tone = (v: number) => (v >= 80 ? "bg-emerald-500" : v >= 65 ? "bg-amber-400" : "bg-rose-500");
+  const textTone = (v: number) => (v >= 80 ? "text-emerald-400" : v >= 65 ? "text-amber-400" : "text-rose-400");
+
+  return (
+    <section aria-label="Attribute breakdown">
+      <div className="flex items-center justify-between mb-2">
+        <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
+          <Target className="h-3.5 w-3.5" aria-hidden /> Attributes
+        </p>
+        <span className="flex items-center gap-2 text-[9px] text-slate-600">
+          <span className="flex items-center gap-0.5"><Star className="h-2.5 w-2.5 text-amber-400" aria-hidden /> key for {player.position}</span>
+          {focusTargets.size > 0 && (
+            <span className="flex items-center gap-0.5"><TrendingUp className="h-2.5 w-2.5 text-emerald-400" aria-hidden /> focus target</span>
+          )}
+        </span>
+      </div>
+      <div className="grid grid-cols-2 gap-x-3 gap-y-2">
+        {entries.map(({ key, label, value }) => (
+          <div key={key}>
+            <div className="flex items-center justify-between gap-1 mb-0.5">
+              <span className="text-[10px] font-semibold text-slate-300 truncate flex items-center gap-1">
+                {label}
+                {keys.has(key) && <Star className="h-2.5 w-2.5 shrink-0 text-amber-400" aria-label={`${label} is a key attribute for ${player.position}`} />}
+                {focusTargets.has(key) && <TrendingUp className="h-2.5 w-2.5 shrink-0 text-emerald-400" aria-label={`${label} is boosted by the current training focus`} />}
+              </span>
+              <span className={cn("text-[10px] font-black tabular-nums", textTone(value))}>{value}</span>
+            </div>
+            <div className="h-1.5 rounded-full bg-slate-800 overflow-hidden" aria-hidden>
+              <div className={cn("h-full rounded-full transition-all", tone(value))} style={{ width: `${Math.min(100, value)}%` }} />
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
   );
 }

@@ -13,10 +13,12 @@ import { TacticsTab } from "@/components/tabs/tactics-tab";
 import { cn } from "@/lib/utils";
 import { posBadgeClass, ratingColor, formatMoney } from "@/lib/format";
 import { ALL_POSITIONS, type TrainingFocus } from "@/lib/game/types";
-import { assumedMinutes, estimateWeeklyXp, growthMultipliers, projectGrowth } from "@/lib/game/devProjection";
+import { assumedMinutes, estimateWeeklyXp, growthMultipliers, playStyleRoadmap, projectGrowth, projectTrajectory } from "@/lib/game/devProjection";
 import { coachMultiplier } from "@/lib/game/advance";
-import { GK_ATTR_LABELS } from "@/lib/game/attributes";
-import { ChevronLeft, ChevronRight, Cross, Filter, HeartPulse, ListChecks, Search, Settings2, TrendingUp, Users, X } from "lucide-react";
+import { GK_ATTR_LABELS, isGKAttributes } from "@/lib/game/attributes";
+import { computePlayStyles } from "@/lib/game/development";
+import { FOCUS_LABEL } from "@/components/development-panel";
+import { ChevronLeft, ChevronRight, Cross, Filter, HeartPulse, ListChecks, Search, Settings2, Sparkles, TrendingUp, Users, X } from "lucide-react";
 
 type GroupFilter = "ALL" | "GK" | "DEF" | "MID" | "ATT";
 type SortKey = "ovr" | "pot" | "age" | "form" | "value" | "wage";
@@ -425,6 +427,7 @@ function SquadHub() {
 
 function DevelopmentView() {
   const game = useAppStore((s) => s.game);
+  const update = useAppStore((s) => s.update);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [horizon, setHorizon] = useState<8 | 16 | 24>(16);
   const devScrollRef = useRef<HTMLDivElement | null>(null);
@@ -545,11 +548,16 @@ function DevelopmentView() {
             const minutes = assumedMinutes(selected, inLineup);
             const mults = growthMultipliers(selected, minutes, coachQ);
             const xp = estimateWeeklyXp(selected, minutes, coachQ);
-            const projection = projectGrowth(selected, horizon, {
-              minutes,
-              coachQ,
-              mentor: selected.mentor ? game.players.find((m) => m.id === selected.mentor!.mentorId) ?? null : null,
-            });
+            const mentor = selected.mentor ? game.players.find((m) => m.id === selected.mentor!.mentorId) ?? null : null;
+            const projection = projectGrowth(selected, horizon, { minutes, coachQ, mentor });
+            const trajectory = projectTrajectory(selected, horizon, { minutes, coachQ, mentor });
+            const roadmap = playStyleRoadmap(selected, computePlayStyles(selected));
+            const setFocus = (focus: TrainingFocus) => {
+              update((g) => {
+                const p = g.players.find((x) => x.id === selected.id);
+                if (p) p.trainingPlan = { ...p.trainingPlan, focus };
+              });
+            };
             const gainLabel = (attr: string) =>
               attr in GK_ATTR_LABELS ? GK_ATTR_LABELS[attr as keyof typeof GK_ATTR_LABELS] : attr.charAt(0).toUpperCase() + attr.slice(1);
             return (
@@ -687,6 +695,77 @@ function DevelopmentView() {
                     <p className="mt-1.5 text-[9px] text-slate-600">
                       Deterministic simulation of the real growth engine at {minutes} min/wk. Change the plan below and the projection updates.
                     </p>
+                  </section>
+
+                  {/* v5.2 growth lab — OVR trajectory curve + road to next PlayStyle */}
+                  <section aria-label="Growth lab" className="rounded-xl border border-slate-800 bg-slate-950/60 p-3 space-y-3">
+                    <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
+                      <Sparkles className="h-3.5 w-3.5 text-teal-300" aria-hidden /> Growth lab
+                    </p>
+                    {(() => {
+                      const W = 320; const H = 92; const PADX = 6; const PADY = 10;
+                      const ceil = selected.potential;
+                      const vals = trajectory.map((pt) => pt.ovr);
+                      const lo = Math.min(...vals) - 1;
+                      const hi = Math.max(...vals, ceil) + 1;
+                      const x = (w: number) => PADX + (w / horizon) * (W - PADX * 2);
+                      const y = (o: number) => PADY + (1 - (o - lo) / Math.max(1, hi - lo)) * (H - PADY * 2);
+                      const path = trajectory.map((pt, i) => `${i === 0 ? "M" : "L"}${x(pt.week).toFixed(1)},${y(pt.ovr).toFixed(1)}`).join(" ");
+                      const end = trajectory[trajectory.length - 1];
+                      const gained = end.ovr - selected.overallRating;
+                      return (
+                        <div>
+                          <div className="flex items-center justify-between">
+                            <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500">OVR trajectory · {horizon}w</p>
+                            <p className={cn("text-[10px] font-black tabular-nums", gained > 0 ? "text-emerald-400" : "text-slate-500")}>
+                              {selected.overallRating} → {end.ovr}{gained > 0 ? ` (+${gained})` : ""}
+                            </p>
+                          </div>
+                          <svg
+                            viewBox={`0 0 ${W} ${H}`}
+                            className="mt-1.5 w-full"
+                            role="img"
+                            aria-label={`Projected overall rating curve over ${horizon} weeks, from ${selected.overallRating} to ${end.ovr}, potential ceiling ${selected.potential}`}
+                          >
+                            <line x1={PADX} x2={W - PADX} y1={y(ceil)} y2={y(ceil)} strokeDasharray="4 3" strokeWidth="1" className="stroke-emerald-500/40" />
+                            <text x={W - PADX} y={Math.max(8, y(ceil) - 3)} textAnchor="end" fontSize="8" className="fill-emerald-500/70">POT {ceil}</text>
+                            <path d={path} fill="none" strokeWidth="2" strokeLinecap="round" className="stroke-teal-300" />
+                            <circle cx={x(end.week)} cy={y(end.ovr)} r="2.5" className="fill-teal-300" />
+                          </svg>
+                        </div>
+                      );
+                    })()}
+
+                    {!isGKAttributes(selected.attributes) && (
+                      <div className="space-y-1.5">
+                        <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Road to next PlayStyle</p>
+                        {roadmap.length === 0 ? (
+                          <p className="text-[10px] text-slate-600">Every PlayStyle is unlocked. Push attributes to 85 (and OVR 85 / POT 90) for Plus versions.</p>
+                        ) : (
+                          roadmap.slice(0, 2).map((item) => (
+                            <div key={item.id} className="flex items-center gap-2 rounded-lg border border-slate-800 bg-slate-950/40 p-2">
+                              <div className="min-w-0 flex-1">
+                                <p className="text-xs font-bold text-slate-200 truncate">{item.name}</p>
+                                <p className="text-[10px] text-slate-500 truncate">
+                                  {item.mainGap > 0 && `+${item.mainGap} ${item.mainAttrLabel}`}
+                                  {item.mainGap > 0 && item.altGap > 0 && " · "}
+                                  {item.altGap > 0 && `+${item.altGap} ${item.altAttrLabel}`}
+                                  {" "}to unlock
+                                </p>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => setFocus(item.suggestedFocus)}
+                                className="shrink-0 min-h-[30px] rounded-md border border-emerald-500/40 bg-emerald-500/10 px-2 text-[10px] font-bold text-emerald-400 hover:bg-emerald-500/20 transition-colors"
+                                aria-label={`Set training focus to ${FOCUS_LABEL[item.suggestedFocus]} to work toward ${item.name}`}
+                              >
+                                Train {FOCUS_LABEL[item.suggestedFocus]}
+                              </button>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    )}
                   </section>
 
                   <Separator className="bg-slate-800" />
