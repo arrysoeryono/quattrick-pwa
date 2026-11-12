@@ -1,7 +1,7 @@
 "use client";
 
 import { create } from "zustand";
-import type { Dataset, Difficulty, GameState, MatchResult, MatchTeamConfig } from "@/lib/game/types";
+import type { Dataset, Difficulty, GameState, HalftimePayload, MatchResult, MatchTeamConfig, Mentality, TacticSliders } from "@/lib/game/types";
 import {
   getGameDb,
   getDatasetSource,
@@ -114,6 +114,8 @@ interface AppStore {
   runner: MatchRunner | null;
   liveFixtureId: number | null;
   liveSnapshot: LiveMatchSnapshot | null;
+  liveHalftime: HalftimePayload | null; // v4.8 — break payload while the half-time menu is open
+  liveSpeed: number; // mirrors the worker speed so the UI stays in sync across the break
   liveResult: MatchResult | null;
   lastAdvance: AdvanceOutcome | null;
 
@@ -135,6 +137,11 @@ interface AppStore {
   kickoff: (fixtureId: number, home: MatchConfigInput, away: MatchConfigInput) => void;
   shout: (id: "go-all-out" | "park-the-bus" | "press-hard" | "time-waste") => void;
   pushTick: (payload: TickPayload) => void;
+  setLiveSpeed: (speed: number) => void;
+  clearHalftime: () => void;
+  liveSub: (outId: number, inId: number) => void;
+  liveTactics: (mentality?: Mentality, sliders?: Partial<TacticSliders>) => void;
+  liveInstant: () => void;
   finishMatch: (result: MatchResult) => Promise<void>;
   clearLiveResult: () => void;
   disposeRunner: () => void;
@@ -230,6 +237,8 @@ export const useAppStore = create<AppStore>((set, get) => {
     runner: null,
     liveFixtureId: null,
     liveSnapshot: null,
+    liveHalftime: null,
+    liveSpeed: 1,
     liveResult: null,
     lastAdvance: null,
 
@@ -409,6 +418,7 @@ export const useAppStore = create<AppStore>((set, get) => {
         phase: "onboarding",
         liveFixtureId: null,
         liveSnapshot: null,
+        liveHalftime: null,
         liveResult: null,
         lastAdvance: null,
       });
@@ -481,9 +491,10 @@ export const useAppStore = create<AppStore>((set, get) => {
       // terminate any previous runner so two workers can never double-apply a result
       get().runner?.dispose();
       const runner = new MatchRunner();
-      set({ runner, liveFixtureId: fixtureId, liveSnapshot: null, liveResult: null });
+      set({ runner, liveFixtureId: fixtureId, liveSnapshot: null, liveResult: null, liveHalftime: null, liveSpeed: 1 });
       runner.setCallbacks({
         onTick: (payload) => get().pushTick(payload),
+        onHalftime: (payload) => set({ liveHalftime: payload }),
         onFulltime: (result) => void get().finishMatch(result),
       });
       runner.start(fixtureId, home, away, 1, get().game?.clubId);
@@ -506,13 +517,36 @@ export const useAppStore = create<AppStore>((set, get) => {
       });
     },
 
+    setLiveSpeed: (speed) => {
+      set({ liveSpeed: speed });
+      get().runner?.setSpeed(speed);
+    },
+
+    /** v4.8 — leave the half-time menu and kick off the second half. */
+    clearHalftime: () => {
+      get().runner?.resume();
+      set({ liveHalftime: null });
+    },
+
+    /** v4.8 — half-time substitution, applied live in the engine. */
+    liveSub: (outId, inId) => get().runner?.sub(outId, inId),
+
+    /** v4.8 — mentality / slider change for the rest of this match only. */
+    liveTactics: (mentality, sliders) => get().runner?.setTactics(mentality, sliders),
+
+    /** v4.8 — jump straight to full-time from the break. */
+    liveInstant: () => {
+      get().runner?.instant();
+      set({ liveHalftime: null });
+    },
+
     finishMatch: async (result) => {
       const { game, dataset } = get();
       get().disposeRunner();
       if (!game || !dataset) return;
       const outcome = advanceAfterUserMatch(game, dataset, result);
       await get().applyAdvance(outcome);
-      set({ liveFixtureId: null, liveSnapshot: null, liveResult: result });
+      set({ liveFixtureId: null, liveSnapshot: null, liveHalftime: null, liveResult: result });
     },
 
     clearLiveResult: () => set({ liveResult: null, lastAdvance: null }),

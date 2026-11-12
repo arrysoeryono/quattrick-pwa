@@ -13,11 +13,14 @@ import { getFormation, positionAffinity } from "./formations";
 import { NEUTRAL_SLIDERS } from "./tacticPresets";
 import { attrValue, gkSaveFactor } from "./attributes";
 import type {
+  HalftimePayload,
   MatchEventLog,
+  MatchPlayerConfig,
   MatchRatingEntry,
   MatchResult,
   MatchStats,
   MatchTeamConfig,
+  Mentality,
   PositionCode,
   TacticSliders,
 } from "./types";
@@ -42,7 +45,7 @@ interface SimPlayer {
   position: string;
   slot: string;
   ovr: number;
-  attributes: MatchTeamConfig["players"][number]["attributes"];
+  attributes: MatchPlayerConfig["attributes"];
   staminaAttr: number;
   staminaNow: number;
   sharpness: number;
@@ -54,6 +57,7 @@ interface SimPlayer {
   shots: number;
   yellow: number;
   sentOff: boolean;
+  subbedOut?: boolean; // replaced by a substitute — kept for match ratings
   instr: { att?: string; def?: string };
   playStyles: Set<string>;
 }
@@ -83,6 +87,9 @@ interface TeamSim {
   side: "home" | "away";
   cfg: MatchTeamConfig;
   players: SimPlayer[];
+  bench: MatchPlayerConfig[]; // substitutes still available
+  subsUsed: number;
+  shoutLog: string[]; // touchline shouts applied (replayed when tactics change)
   goals: number;
   shots: number;
   onTarget: number;
@@ -99,10 +106,13 @@ type WorkerInbound =
   | { type: "pause" }
   | { type: "resume" }
   | { type: "instant" }
-  | { type: "shout"; id: "go-all-out" | "park-the-bus" | "press-hard" | "time-waste" };
+  | { type: "shout"; id: "go-all-out" | "park-the-bus" | "press-hard" | "time-waste" }
+  | { type: "sub"; outId: number; inId: number }
+  | { type: "tactics"; mentality?: Mentality; sliders?: Partial<TacticSliders> };
 
 type WorkerOutbound =
   | { type: "tick"; minute: number; half: 1 | 2 | "FT"; snapshot: LiveOut }
+  | { type: "halftime"; minute: number; payload: HalftimePayload }
   | { type: "fulltime"; result: MatchResult }
   | { type: "ready" };
 
@@ -198,30 +208,31 @@ function computeMods(cfg: MatchTeamConfig): TeamMods {
 }
 
 /* ---------- team preparation ---------- */
+function toSimPlayer(p: MatchPlayerConfig, slot: string): SimPlayer {
+  const affinity = positionAffinity(p.position as PositionCode, slot as PositionCode);
+  const sharpAdj = p.sharpness >= 80 ? 5 : p.sharpness >= 60 ? 3 : p.sharpness >= 40 ? 0 : -4;
+  const eff = Math.round(p.ovr * affinity + sharpAdj + (p.morale - 60) * 0.03);
+  return {
+    ...p,
+    position: p.position,
+    slot,
+    ovr: Math.max(20, eff),
+    staminaAttr: p.stamina,
+    staminaNow: 100,
+    rating: 6.4,
+    goals: 0,
+    assists: 0,
+    shots: 0,
+    yellow: 0,
+    sentOff: false,
+    instr: p.instr ?? {},
+    playStyles: new Set(p.playStyles ?? []),
+  };
+}
+
 function makeTeam(cfg: MatchTeamConfig, side: "home" | "away", oppMods: TeamMods | null): TeamSim {
   const formation = getFormation(cfg.formation);
-  const players: SimPlayer[] = cfg.players.map((p, i) => {
-    const slot = formation.positions[i] ?? p.position;
-    const affinity = positionAffinity(p.position as PositionCode, slot);
-    const sharpAdj = p.sharpness >= 80 ? 5 : p.sharpness >= 60 ? 3 : p.sharpness >= 40 ? 0 : -4;
-    const eff = Math.round(p.ovr * affinity + sharpAdj + (p.morale - 60) * 0.03);
-    return {
-      ...p,
-      position: p.position,
-      slot,
-      ovr: Math.max(20, eff),
-      staminaAttr: p.stamina,
-      staminaNow: 100,
-      rating: 6.4,
-      goals: 0,
-      assists: 0,
-      shots: 0,
-      yellow: 0,
-      sentOff: false,
-      instr: p.instr ?? {},
-      playStyles: new Set(p.playStyles ?? []),
-    };
-  });
+  const players: SimPlayer[] = cfg.players.map((p, i) => toSimPlayer(p, formation.positions[i] ?? p.position));
 
   const mods = computeMods(cfg);
   // man-mark from the opponent dulls this team's attack
@@ -234,6 +245,9 @@ function makeTeam(cfg: MatchTeamConfig, side: "home" | "away", oppMods: TeamMods
     side,
     cfg,
     players,
+    bench: [...(cfg.bench ?? [])],
+    subsUsed: 0,
+    shoutLog: [],
     goals: 0,
     shots: 0,
     onTarget: 0,
@@ -245,7 +259,7 @@ function makeTeam(cfg: MatchTeamConfig, side: "home" | "away", oppMods: TeamMods
   };
 }
 
-const onPitch = (t: TeamSim) => t.players.filter((p) => !p.sentOff);
+const onPitch = (t: TeamSim) => t.players.filter((p) => !p.sentOff && !p.subbedOut);
 
 function teamPower(t: TeamSim, zone: "att" | "mid" | "def"): number {
   const isAtt = (slot: string) => ["LW", "RW", "LF", "RF", "CF", "ST"].includes(slot);
@@ -377,7 +391,7 @@ function simulateMinute(): void {
   // stamina drain: base load + tactical intensity + playstyle economy
   for (const t of [h, a]) {
     for (const p of t.players) {
-      if (p.sentOff) continue;
+      if (p.sentOff || p.subbedOut) continue;
       let drain = 0.34 + (100 - p.staminaAttr) / 100 * 0.38 + t.mods.staminaDrain + (t.mentality === "attacking" ? 0.05 : 0);
       if (p.playStyles.has("engine")) drain *= 0.88;
       else if (p.playStyles.has("rapid")) drain *= 0.93;
@@ -534,6 +548,39 @@ function snapshot(): LiveOut {
   };
 }
 
+/** v4.8 — full break report for the user's team, posted when the engine pauses at HT. */
+function halftimePayload(): HalftimePayload {
+  const t = userTeamId === home?.cfg.id ? home : userTeamId === away?.cfg.id ? away : home!;
+  const snap = snapshot();
+  return {
+    minute,
+    homeGoals: snap.homeGoals,
+    awayGoals: snap.awayGoals,
+    homeName: snap.homeName,
+    awayName: snap.awayName,
+    stats: snap.stats,
+    events: snap.events,
+    momentum: snap.momentum ?? 0,
+    shoutsLeft: snap.shoutsLeft,
+    userSide: t.side,
+    players: t.players.map((p) => ({
+      id: p.id,
+      name: p.name,
+      slot: p.slot,
+      position: p.position,
+      ovr: p.ovr,
+      staminaNow: Math.round(p.staminaNow),
+      rating: Math.round(p.rating * 10) / 10,
+      goals: p.goals,
+      assists: p.assists,
+      yellow: p.yellow,
+      sentOff: p.sentOff,
+      subbedOut: Boolean(p.subbedOut),
+    })),
+    benchIds: t.bench.map((b) => b.id),
+  };
+}
+
 /* ---------- main loop ---------- */
 async function run(): Promise<void> {
   running = true;
@@ -544,6 +591,11 @@ async function run(): Promise<void> {
     simulateMinute();
     const half: 1 | 2 | "FT" = minute <= 45 + addedTime1 ? 1 : 2;
     post({ type: "tick", minute, half: minute >= finalMinute ? "FT" : half, snapshot: snapshot() });
+    // v4.8 — stop at the break and hand over to the FIFA-style half-time menu
+    if (minute === 45 + addedTime1 && !instant) {
+      paused = true;
+      post({ type: "halftime", minute, payload: halftimePayload() });
+    }
     if (!instant) await sleep(Math.max(8, 90 / speed));
   }
   post({ type: "fulltime", result: buildResult() });
@@ -579,30 +631,72 @@ function begin(fixture: number, hCfg: MatchTeamConfig, aCfg: MatchTeamConfig, sp
 }
 
 /** v4.4 touchline shout — the manager barks an order and the team reacts. */
+function applyShoutMods(mods: TeamMods, id: string): void {
+  if (id === "go-all-out") {
+    mods.att *= 1.06;
+    mods.def *= 0.96;
+    mods.staminaDrain += 0.015;
+  } else if (id === "park-the-bus") {
+    mods.def *= 1.07;
+    mods.att *= 0.94;
+  } else if (id === "press-hard") {
+    mods.press += 12;
+    mods.staminaDrain += 0.02;
+  } else {
+    mods.mid *= 1.03;
+  }
+}
+
 function applyShout(id: "go-all-out" | "park-the-bus" | "press-hard" | "time-waste"): void {
   if (shoutsLeft <= 0) return;
   const t = userTeamId === (home?.cfg.id ?? -1) ? home : userTeamId === (away?.cfg.id ?? -1) ? away : null;
   if (!t) return;
   shoutsLeft -= 1;
+  applyShoutMods(t.mods, id);
+  if (id === "go-all-out") t.mentality = "attacking";
+  if (id === "park-the-bus") t.mentality = "defensive";
+  t.shoutLog.push(id);
   if (id === "go-all-out") {
-    t.mentality = "attacking";
-    t.mods.att *= 1.06;
-    t.mods.def *= 0.96;
-    t.mods.staminaDrain += 0.015;
     events.push({ minute, type: "info", teamSide: t.side, text: `The manager demands everything! ${t.cfg.shortName} throw men forward!` });
   } else if (id === "park-the-bus") {
-    t.mentality = "defensive";
-    t.mods.def *= 1.07;
-    t.mods.att *= 0.94;
     events.push({ minute, type: "info", teamSide: t.side, text: `${t.cfg.shortName} drop into a low block and park the bus!` });
   } else if (id === "press-hard") {
-    t.mods.press += 12;
-    t.mods.staminaDrain += 0.02;
     events.push({ minute, type: "info", teamSide: t.side, text: `Press! Press! ${t.cfg.shortName} hunt the ball all over the pitch.` });
   } else {
-    t.mods.mid *= 1.03;
     events.push({ minute, type: "info", teamSide: t.side, text: `${t.cfg.shortName} slow it down and keep the ball, running down the clock.` });
   }
+}
+
+/** v4.8 — rebuild a team's mods from its (possibly updated) config, replaying
+ *  home advantage, derby intensity, man-mark and any touchline shouts. */
+function recomputeMods(t: TeamSim): void {
+  const m = computeMods(t.cfg);
+  if (t.side === "home") m.att *= 1.03;
+  else m.att *= 0.985;
+  if (isDerby) {
+    m.card *= 1.25;
+    m.staminaDrain += 0.02;
+  }
+  const markers = t.cfg.players.filter((p) => p.instr?.def === "man-mark").length;
+  if (markers > 0) m.att *= Math.max(0.94, 1 - markers * 0.02);
+  for (const id of t.shoutLog) applyShoutMods(m, id);
+  t.mods = m;
+}
+
+/** v4.8 — half-time substitution: a bench player takes the outgoing slot. */
+function applySub(outId: number, inId: number): void {
+  const t = userTeamId === (home?.cfg.id ?? -1) ? home : userTeamId === (away?.cfg.id ?? -1) ? away : null;
+  if (!t) return;
+  if (t.subsUsed >= 5) return;
+  const outP = t.players.find((p) => p.id === outId && !p.subbedOut && !p.sentOff);
+  const bIdx = t.bench.findIndex((b) => b.id === inId);
+  if (!outP || bIdx < 0) return;
+  const inCfg = t.bench.splice(bIdx, 1)[0];
+  const sim = toSimPlayer(inCfg, outP.slot);
+  outP.subbedOut = true;
+  t.players.push(sim);
+  t.subsUsed += 1;
+  events.push({ minute, type: "info", teamSide: t.side, text: `Substitution for ${t.cfg.shortName}: ${sim.name} replaces ${outP.name}.` });
 }
 
 self.onmessage = (e: MessageEvent<WorkerInbound>) => {
@@ -628,6 +722,22 @@ self.onmessage = (e: MessageEvent<WorkerInbound>) => {
     case "shout":
       applyShout(msg.id);
       break;
+    case "sub":
+      applySub(msg.outId, msg.inId);
+      break;
+    case "tactics": {
+      const t = userTeamId === (home?.cfg.id ?? -1) ? home : userTeamId === (away?.cfg.id ?? -1) ? away : null;
+      if (!t) break;
+      if (msg.mentality) {
+        t.mentality = msg.mentality;
+        t.cfg.mentality = msg.mentality;
+      }
+      if (msg.sliders) {
+        t.cfg.sliders = { ...(t.cfg.sliders ?? {}), ...msg.sliders };
+      }
+      recomputeMods(t);
+      break;
+    }
   }
 };
 

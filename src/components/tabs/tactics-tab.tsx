@@ -9,10 +9,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Slider } from "@/components/ui/slider";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { FORMATIONS, formationCoordinates, getFormation, positionAffinity, affinityLabel, positionGroup } from "@/lib/game/formations";
-import { autoPickLineup, effectiveOvr, squadChemistry } from "@/lib/game/tactics";
+import { autoPickLineup, autoRotateLineup, effectiveOvr, squadChemistry } from "@/lib/game/tactics";
 import { GAME_PLANS, SLIDER_META, ATTACK_INSTRUCTIONS, DEFEND_INSTRUCTIONS, instructionsForGroup } from "@/lib/game/tacticPresets";
+import { AdvancedPitch, affinityRing } from "@/components/advanced-pitch";
 import { cn } from "@/lib/utils";
-import { ClipboardList, Dumbbell, Save, Sparkles, Trash2, Wand2 } from "lucide-react";
+import { ClipboardList, Dumbbell, Repeat, Save, Sparkles, Trash2, Wand2 } from "lucide-react";
 import type { PlayerState, SetPieceAssignments } from "@/lib/game/types";
 
 const CATEGORY_TONE: Record<string, string> = {
@@ -43,13 +44,6 @@ const CATEGORY_TONE: Record<string, string> = {
   "Wing Counter Attack": "text-orange-300 border-orange-500/40",
 };
 
-function affinityRing(a: number): string {
-  if (a >= 0.95) return "border-emerald-400";
-  if (a >= 0.8) return "border-emerald-500/60";
-  if (a >= 0.65) return "border-amber-500/60";
-  return "border-rose-500/70";
-}
-
 const SET_PIECE_ROLES: { key: keyof SetPieceAssignments; label: string }[] = [
   { key: "captain", label: "Captain" },
   { key: "penalty", label: "Penalty taker" },
@@ -57,6 +51,10 @@ const SET_PIECE_ROLES: { key: keyof SetPieceAssignments; label: string }[] = [
   { key: "cornerLeft", label: "Corner (left)" },
   { key: "cornerRight", label: "Corner (right)" },
 ];
+
+function statTone(v: number, great = 80, good = 65): string {
+  return v >= great ? "text-emerald-400" : v >= good ? "text-amber-400" : "text-rose-400";
+}
 
 export function TacticsTab() {
   const game = useAppStore((s) => s.game);
@@ -130,6 +128,13 @@ export function TacticsTab() {
   const autoPick = () => {
     update((g) => {
       g.lineup = autoPickLineup(g.players, g.tactics.formationName);
+      g.tactics.instructions = {};
+    });
+  };
+
+  const autoRotate = () => {
+    update((g) => {
+      g.lineup = autoRotateLineup(g.players, g.tactics.formationName);
       g.tactics.instructions = {};
     });
   };
@@ -215,6 +220,30 @@ export function TacticsTab() {
     .map((id) => game.players.find((p) => p.id === id))
     .filter(Boolean) as PlayerState[];
 
+  /* ---- v4.8 advanced pitch stats ---- */
+  const pitchStats = (() => {
+    let effSum = 0;
+    let effCount = 0;
+    let natural = 0;
+    game.lineup.forEach((id, i) => {
+      if (!id) return;
+      const p = game.players.find((x) => x.id === id);
+      if (!p) return;
+      const slot = formation.positions[i];
+      effSum += effectiveOvr(p, slot);
+      effCount += 1;
+      if (positionAffinity(p.position, slot) >= 0.8) natural += 1;
+    });
+    const avg = (nums: number[]) => (nums.length ? Math.round(nums.reduce((a, b) => a + b, 0) / nums.length) : 0);
+    return {
+      avgEff: effCount ? Math.round(effSum / effCount) : 0,
+      avgSharp: avg(lineupPlayers.map((p) => p.sharpness)),
+      avgStamina: avg(lineupPlayers.map((p) => p.stamina)),
+      natural,
+      filled: effCount,
+    };
+  })();
+
   const slotGroup = selectedSlot !== null ? positionGroup(formation.positions[selectedSlot]) : null;
   const slotInstr = slotGroup ? instructionsForGroup(slotGroup) : null;
   const slotPlayerInstr = selectedSlot !== null ? t.instructions?.[String(selectedSlot)] : undefined;
@@ -240,52 +269,75 @@ export function TacticsTab() {
             {formation.category}
           </Badge>
         </Button>
-        <Button variant="outline" size="icon" className="h-10 w-10 border-slate-700" onClick={autoPick} aria-label="Auto pick best XI">
+        <Button variant="outline" size="icon" className="h-10 w-10 border-slate-700" onClick={autoPick} title="Auto pick strongest XI" aria-label="Auto pick best XI">
           <Wand2 className="h-4 w-4 text-emerald-400" aria-hidden />
         </Button>
-        <Button variant="outline" size="icon" className="h-10 w-10 border-slate-700" onClick={() => setSetPieceDialog(true)} aria-label="Set piece takers">
+        <Button variant="outline" size="icon" className="h-10 w-10 border-slate-700" onClick={autoRotate} title="Auto rotation — give minutes to low-minute players to raise sharpness" aria-label="Auto rotation: prioritise players with few minutes">
+          <Repeat className="h-4 w-4 text-sky-300" aria-hidden />
+        </Button>
+        <Button variant="outline" size="icon" className="h-10 w-10 border-slate-700" onClick={() => setSetPieceDialog(true)} title="Set piece takers" aria-label="Set piece takers">
           <ClipboardList className="h-4 w-4 text-amber-400" aria-hidden />
         </Button>
       </section>
 
-      {/* pitch */}
-      <section aria-label="Pitch lineup">
-        <div className="pitch-bg relative rounded-xl border border-emerald-900/60 overflow-hidden" style={{ aspectRatio: "3 / 4" }}>
-          {/* markings */}
-          <div className="absolute inset-2 border border-white/20 rounded-md" aria-hidden />
-          <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 h-[22%] w-[30%] border border-white/20 rounded-full" aria-hidden />
-          <div className="absolute left-2 right-2 top-1/2 h-px bg-white/20" aria-hidden />
-          <div className="absolute left-1/2 -translate-x-1/2 bottom-2 w-[44%] h-[14%] border border-white/20 border-b-0" aria-hidden />
-          <div className="absolute left-1/2 -translate-x-1/2 top-2 w-[44%] h-[14%] border border-white/20 border-t-0" aria-hidden />
-
-          {coords.map((c, i) => {
+      {/* v4.8 advanced pitch */}
+      <section aria-label="Pitch lineup" className="space-y-2">
+        <AdvancedPitch
+          coords={coords}
+          players={coords.map((c, i) => {
             const player = slotPlayer(i);
+            if (!player) return null;
             const slot = formation.positions[i];
-            const aff = player ? positionAffinity(player.position, slot) : 1;
-            const eff = player ? effectiveOvr(player, slot) : 0;
-            const hasInstr = player && (t.instructions?.[String(i)]?.att || t.instructions?.[String(i)]?.def);
-            return (
-              <button
-                key={i}
-                type="button"
-                onClick={() => setSlotDialog(i)}
-                className="absolute -translate-x-1/2 -translate-y-1/2 flex flex-col items-center gap-0.5 min-h-[44px] min-w-[44px] justify-center"
-                style={{ left: `${c.x * 100}%`, top: `${c.y * 100}%` }}
-                aria-label={`Slot ${slot}: ${player ? player.name : "empty"}${hasInstr ? ", has instructions" : ""}`}
-              >
-                <span className={cn(
-                  "flex h-9 w-9 items-center justify-center rounded-full border-2 bg-slate-950/85 text-xs font-black shadow-lg",
-                  player ? `${affinityRing(aff)} text-slate-50` : "border-dashed border-slate-400/70 text-slate-500",
-                  hasInstr && "ring-2 ring-amber-400/60",
-                )}>
-                  {player ? eff : slot}
-                </span>
-                <span className="max-w-[68px] truncate rounded bg-slate-950/80 px-1 text-[9px] font-semibold text-slate-300">
-                  {player ? player.name.split(" ").pop() : "Empty"}
-                </span>
-              </button>
-            );
+            return {
+              id: player.id,
+              slotCode: slot,
+              name: player.name,
+              eff: effectiveOvr(player, slot),
+              affinity: positionAffinity(player.position, slot),
+              sharpness: player.sharpness,
+              stamina: player.stamina,
+              injured: player.injuryWeeks > 0,
+              hasInstruction: Boolean(t.instructions?.[String(i)]?.att || t.instructions?.[String(i)]?.def),
+              isCaptain: t.setPieces?.captain === player.id,
+              yellow: 0,
+            };
           })}
+          onSelect={(i) => setSlotDialog(i)}
+          showBars="both"
+          connections
+          ariaLabel={`Formation pitch, ${formation.name}, with player ratings, sharpness and stamina`}
+        />
+        <div className="grid grid-cols-5 gap-1.5 rounded-xl border border-slate-800 bg-slate-950/40 p-2.5 text-center">
+          <div>
+            <p className={cn("font-mono text-sm font-black tabular-nums", statTone(pitchStats.avgEff))}>{pitchStats.avgEff}</p>
+            <p className="text-[9px] font-semibold uppercase tracking-wide text-slate-500">XI ovr</p>
+          </div>
+          <div>
+            <p className={cn("font-mono text-sm font-black tabular-nums", statTone(chemistry, 85, 70))}>{chemistry}%</p>
+            <p className="text-[9px] font-semibold uppercase tracking-wide text-slate-500">Chem</p>
+          </div>
+          <div>
+            <p className={cn("font-mono text-sm font-black tabular-nums", statTone(pitchStats.avgSharp, 80, 60))}>{pitchStats.avgSharp}</p>
+            <p className="text-[9px] font-semibold uppercase tracking-wide text-slate-500">Sharp</p>
+          </div>
+          <div>
+            <p className={cn("font-mono text-sm font-black tabular-nums", statTone(pitchStats.avgStamina, 85, 70))}>{pitchStats.avgStamina}</p>
+            <p className="text-[9px] font-semibold uppercase tracking-wide text-slate-500">Fit</p>
+          </div>
+          <div>
+            <p className={cn("font-mono text-sm font-black tabular-nums", pitchStats.natural === pitchStats.filled && pitchStats.filled > 0 ? "text-emerald-400" : "text-amber-400")}>
+              {pitchStats.natural}<span className="text-slate-600">/{pitchStats.filled}</span>
+            </p>
+            <p className="text-[9px] font-semibold uppercase tracking-wide text-slate-500">Natural</p>
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-[9px] text-slate-600">
+          <span className="flex items-center gap-1"><span className="h-1.5 w-3 rounded-full bg-emerald-400" aria-hidden /> high</span>
+          <span className="flex items-center gap-1"><span className="h-1.5 w-3 rounded-full bg-amber-400" aria-hidden /> medium</span>
+          <span className="flex items-center gap-1"><span className="h-1.5 w-3 rounded-full bg-rose-400" aria-hidden /> low</span>
+          <span>top bar = sharpness · bottom bar = fitness</span>
+          <span className="flex items-center gap-1"><span className="flex h-3 w-3 items-center justify-center rounded-full bg-amber-400 text-[7px] font-black text-slate-950">C</span> captain</span>
+          <span className="flex items-center gap-1"><span className="h-1.5 w-1.5 rounded-full bg-amber-400" aria-hidden /> custom instruction</span>
         </div>
       </section>
 
@@ -374,7 +426,7 @@ export function TacticsTab() {
           ))}
         </div>
         <p className="text-[11px] text-slate-600 text-center">
-          Tap a chip to swap players and add per-player instructions. Amber ring = custom instruction.
+          Tap a chip to swap players and add per-player instructions. Use the repeat button for fair auto-rotation of low-minute players.
         </p>
       </section>
 

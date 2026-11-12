@@ -791,6 +791,23 @@ export function buildUserMatchTeam(game: GameState, team: TeamRow) {
       };
     }
   }
+  // v4.8 — bench of fit substitutes (max 9, strongest first) for half-time swaps
+  const benchPlayers = game.players
+    .filter((p) => !used.has(p.id) && p.injuryWeeks === 0)
+    .sort((a, b) => b.overallRating - a.overallRating)
+    .slice(0, 9)
+    .map((p) => ({
+      id: p.id,
+      name: p.name,
+      position: p.position,
+      ovr: p.overallRating,
+      attributes: p.attributes,
+      stamina: p.stamina,
+      sharpness: p.sharpness,
+      morale: p.morale,
+      age: p.age,
+      playStyles: [...computePlayStyles(p).map((s) => s.id)],
+    }));
   return {
     id: game.clubId,
     name: team.name,
@@ -800,6 +817,7 @@ export function buildUserMatchTeam(game: GameState, team: TeamRow) {
     sliders: game.tactics.sliders,
     setPieces: game.tactics.setPieces,
     players: players.filter(Boolean) as NonNullable<(typeof players)[number]>[],
+    bench: benchPlayers,
   };
 }
 

@@ -414,6 +414,21 @@ export interface LiveMatchSnapshot {
   shoutsLeft?: number;
 }
 
+/** One player row inside a MatchTeamConfig (starter or bench). */
+export interface MatchPlayerConfig {
+  id: number;
+  name: string;
+  position: PositionCode;
+  ovr: number;
+  attributes: PositionalAttributes;
+  stamina: number;
+  sharpness: number;
+  morale: number;
+  age: number;
+  instr?: PlayerInstruction;
+  playStyles?: string[]; // playstyle ids active in the engine
+}
+
 export interface MatchTeamConfig {
   id: number;
   name: string;
@@ -424,17 +439,39 @@ export interface MatchTeamConfig {
   setPieces?: Partial<SetPieceAssignments>;
   isDerby?: boolean; // v4.4 rivalry intensity
   /** 11 starters aligned to formation slots */
-  players: {
-    id: number;
-    name: string;
-    position: PositionCode;
-    ovr: number;
-    attributes: PositionalAttributes;
-    stamina: number;
-    sharpness: number;
-    morale: number;
-    age: number;
-    instr?: PlayerInstruction;
-    playStyles?: string[]; // playstyle ids active in the engine
-  }[];
+  players: MatchPlayerConfig[];
+  /** v4.8 — substitutes available for half-time swaps (max 9). */
+  bench?: MatchPlayerConfig[];
+}
+
+/** v4.8 — one player's live status at the half-time break. */
+export interface HalftimePlayer {
+  id: number;
+  name: string;
+  slot: string;
+  position: string;
+  ovr: number;
+  staminaNow: number;
+  rating: number;
+  goals: number;
+  assists: number;
+  yellow: number;
+  sentOff: boolean;
+  subbedOut: boolean;
+}
+
+/** v4.8 — payload posted by the match worker when it pauses at the break. */
+export interface HalftimePayload {
+  minute: number;
+  homeGoals: number;
+  awayGoals: number;
+  homeName: string;
+  awayName: string;
+  stats: MatchStats;
+  events: MatchEventLog[];
+  momentum: number;
+  shoutsLeft: number;
+  userSide: "home" | "away";
+  players: HalftimePlayer[]; // user's XI at the break, aligned to formation slots
+  benchIds: number[]; // substitute ids still available in the engine
 }

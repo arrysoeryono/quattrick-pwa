@@ -4,7 +4,7 @@
  * Client-side handle to the match engine Web Worker.
  * Spawned lazily in the browser only (never during SSR).
  */
-import type { MatchResult, MatchTeamConfig } from "./types";
+import type { HalftimePayload, MatchResult, MatchTeamConfig, Mentality, TacticSliders } from "./types";
 
 export interface TickPayload {
   minute: number;
@@ -30,6 +30,7 @@ export type ShoutId = "go-all-out" | "park-the-bus" | "press-hard" | "time-waste
 
 export interface MatchRunnerCallbacks {
   onTick?: (payload: TickPayload) => void;
+  onHalftime?: (payload: HalftimePayload) => void;
   onFulltime?: (result: MatchResult) => void;
   onReady?: () => void;
 }
@@ -45,6 +46,7 @@ export class MatchRunner {
       this.worker.onmessage = (e: MessageEvent) => {
         const msg = e.data;
         if (msg.type === "tick") this.callbacks.onTick?.(msg as TickPayload & { type: "tick" });
+        else if (msg.type === "halftime") this.callbacks.onHalftime?.((msg as { payload: HalftimePayload }).payload);
         else if (msg.type === "fulltime") {
           this.callbacks.onFulltime?.(msg.result as MatchResult);
           this.dispose();
@@ -61,6 +63,16 @@ export class MatchRunner {
 
   shout(id: ShoutId): void {
     this.worker?.postMessage({ type: "shout", id });
+  }
+
+  /** v4.8 — half-time substitution (max 5 per match). */
+  sub(outId: number, inId: number): void {
+    this.worker?.postMessage({ type: "sub", outId, inId });
+  }
+
+  /** v4.8 — update the user's mentality / sliders for the rest of the match. */
+  setTactics(mentality?: Mentality, sliders?: Partial<TacticSliders>): void {
+    this.worker?.postMessage({ type: "tactics", mentality, sliders });
   }
 
   setSpeed(speed: number): void {

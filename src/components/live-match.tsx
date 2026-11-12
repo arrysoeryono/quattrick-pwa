@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useAppStore } from "@/lib/store/gameStore";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
+import { HalftimeMenu } from "@/components/halftime-menu";
 import { cn } from "@/lib/utils";
 import { Goal, Megaphone, Pause, Play, Shield, Square, Timer, Zap } from "lucide-react";
 
@@ -56,8 +57,11 @@ export function LiveMatch() {
   const dataset = useAppStore((s) => s.dataset);
   const game = useAppStore((s) => s.game);
   const liveFixtureId = useAppStore((s) => s.liveFixtureId);
-  const [speed, setSpeed] = useState(1);
+  const liveHalftime = useAppStore((s) => s.liveHalftime);
+  const liveSpeed = useAppStore((s) => s.liveSpeed);
+  const setLiveSpeed = useAppStore((s) => s.setLiveSpeed);
   const [paused, setPaused] = useState(false);
+  const speed = liveSpeed;
   const feedRef = useRef<HTMLDivElement>(null);
   const lastGoalCount = useRef(0);
   const shout = useAppStore((s) => s.shout);
@@ -85,6 +89,9 @@ export function LiveMatch() {
 
   if (!liveSnapshot || !game || !dataset) return null;
 
+  // v4.8 — the engine pauses itself at the break: hand over to the half-time menu
+  if (liveHalftime) return <HalftimeMenu ht={liveHalftime} />;
+
   const homeShort = homeTeam?.shortName ?? "HOM";
   const awayShort = awayTeam?.shortName ?? "AWY";
   const userGoalsFirst = userIsHome;
@@ -97,8 +104,7 @@ export function LiveMatch() {
   const progress = Math.min(100, (minute / 95) * 100);
 
   const changeSpeed = (s: number) => {
-    setSpeed(s);
-    runner?.setSpeed(s);
+    setLiveSpeed(s);
   };
 
   const togglePause = () => {
