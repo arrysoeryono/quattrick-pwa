@@ -22,7 +22,8 @@ import {
 import { buildFcProfile } from "@/lib/game/fc";
 import { AdvancedPitch, affinityRing } from "@/components/advanced-pitch";
 import { cn } from "@/lib/utils";
-import { ClipboardList, Dumbbell, RefreshCw, Repeat, Save, Sparkles, Trash2, Wand2 } from "lucide-react";
+import { Check, ClipboardList, Dumbbell, RefreshCw, Repeat, Save, Sparkles, Trash2, Wand2 } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
 import type { PlayerState, SetPieceAssignments, SlotRole } from "@/lib/game/types";
 
 const CATEGORY_TONE: Record<string, string> = {
@@ -68,11 +69,14 @@ function statTone(v: number, great = 80, good = 65): string {
 export function TacticsTab() {
   const game = useAppStore((s) => s.game);
   const update = useAppStore((s) => s.update);
+  const { toast } = useToast();
   const [formationDialog, setFormationDialog] = useState(false);
   const [setPieceDialog, setSetPieceDialog] = useState(false);
   const [slotDialog, setSlotDialog] = useState<number | null>(null);
   const [presetDialog, setPresetDialog] = useState(false);
   const [presetName, setPresetName] = useState("");
+  const [presetMode, setPresetMode] = useState<"new" | "overwrite">("new");
+  const [overwriteTarget, setOverwriteTarget] = useState<string | null>(null);
 
   const formation = useMemo(() => (game ? getFormation(game.tactics.formationName) : null), [game]);
   const coords = useMemo(() => (formation ? formationCoordinates(formation.positions) : []), [formation]);
@@ -244,26 +248,39 @@ export function TacticsTab() {
   });
 
   const savePreset = () => {
+    const name = presetName.trim() || `Preset ${game.tacticPresets.length + 1}`;
     update((g) => {
       if (g.tacticPresets.length >= 6) return;
       g.tacticPresets = [...g.tacticPresets, {
         id: Math.random().toString(36).slice(2, 10),
-        name: presetName.trim() || `Preset ${g.tacticPresets.length + 1}`,
+        name,
         ...snapshotTactics(g),
       }];
     });
+    toast({ title: "Preset saved", description: `\u201c${name}\u201d now holds the current formation, XI, FC IQ roles, instructions and set pieces.` });
     setPresetName("");
     setPresetDialog(false);
   };
 
   /** v5.1 — overwrite an existing preset with the current tactic, lineup,
-   *  FC IQ roles, instructions and set pieces. */
-  const updatePreset = (id: string) => {
+   *  FC IQ roles, instructions and set pieces. Opened from the save dialog
+   *  so the destructive action is always confirmed first. */
+  const confirmOverwrite = () => {
+    if (!overwriteTarget) return;
+    const target = game.tacticPresets.find((p) => p.id === overwriteTarget);
+    if (!target) return;
     update((g) => {
-      const idx = g.tacticPresets.findIndex((p) => p.id === id);
-      if (idx === -1) return;
-      g.tacticPresets = g.tacticPresets.map((p, i) => (i === idx ? { ...p, ...snapshotTactics(g) } : p));
+      g.tacticPresets = g.tacticPresets.map((p) => (p.id === overwriteTarget ? { ...p, ...snapshotTactics(g) } : p));
     });
+    toast({ title: "Preset overwritten", description: `\u201c${target.name}\u201d was replaced with the current tactic, XI, FC IQ roles, instructions and set pieces.` });
+    setPresetDialog(false);
+  };
+
+  const openOverwriteDialog = (presetId?: string) => {
+    setPresetMode("overwrite");
+    setOverwriteTarget(presetId ?? null);
+    setPresetName("");
+    setPresetDialog(true);
   };
 
   const applyPreset = (id: string) => {
@@ -528,7 +545,7 @@ export function TacticsTab() {
         </div>
         {game.tacticPresets.length === 0 ? (
           <p className="text-[11px] text-slate-600 mb-2">
-            Save up to 6 complete tactics — formation, starting XI, game plan, sliders, FC IQ roles, instructions and set pieces — then swap them in one tap.
+            Save up to 6 complete tactics — formation, starting XI, game plan, sliders, FC IQ roles, instructions and set pieces — then swap them in one tap. Overwrite any preset with your current setup whenever you like.
           </p>
         ) : (
           <div className="grid grid-cols-2 gap-1.5 mb-2">
@@ -557,10 +574,10 @@ export function TacticsTab() {
                     </button>
                     <button
                       type="button"
-                      onClick={() => updatePreset(preset.id)}
+                      onClick={() => openOverwriteDialog(preset.id)}
                       className="flex h-7 w-7 items-center justify-center rounded-md border border-sky-500/40 text-sky-400 hover:bg-sky-500/10 transition-colors"
                       aria-label={`Overwrite preset ${preset.name} with current tactic`}
-                      title="Overwrite this preset with the current tactic, lineup, roles, instructions and set pieces"
+                      title="Save the current tactic over this preset (asks for confirmation)"
                     >
                       <RefreshCw className="h-3 w-3" aria-hidden />
                     </button>
@@ -581,12 +598,14 @@ export function TacticsTab() {
         <Button
           variant="outline"
           className="w-full border-slate-700 text-slate-300"
-          disabled={game.tacticPresets.length >= 6}
-          onClick={() => { setPresetName(""); setPresetDialog(true); }}
-          aria-label="Save current tactic as preset"
+          onClick={() => {
+            if (game.tacticPresets.length >= 6) openOverwriteDialog();
+            else { setPresetMode("new"); setOverwriteTarget(null); setPresetName(""); setPresetDialog(true); }
+          }}
+          aria-label="Save current tactic as a new preset, or overwrite an existing one"
         >
           <Save className="h-4 w-4 mr-2" aria-hidden />
-          {game.tacticPresets.length >= 6 ? "All 6 slots used — delete one first" : "Save current tactic"}
+          {game.tacticPresets.length >= 6 ? "All 6 slots used — overwrite a preset" : "Save / overwrite tactic"}
         </Button>
       </section>
 
@@ -617,29 +636,124 @@ export function TacticsTab() {
         </p>
       </section>
 
-      {/* save preset dialog */}
+      {/* save / overwrite preset dialog */}
       <Dialog open={presetDialog} onOpenChange={setPresetDialog}>
-        <DialogContent className="max-w-[360px]">
+        <DialogContent className="max-w-[380px]">
           <DialogHeader>
             <DialogTitle className="text-left">Save tactic preset</DialogTitle>
             <DialogDescription className="text-left">
-              Snapshots the current formation, starting XI, game plan, sliders, FC IQ roles, instructions and set pieces. {6 - game.tacticPresets.length} slot{6 - game.tacticPresets.length === 1 ? "" : "s"} left.
+              Snapshots the current formation, starting XI, game plan, sliders, FC IQ roles, instructions and set pieces.
+              {presetMode === "new" && game.tacticPresets.length < 6 && ` ${6 - game.tacticPresets.length} slot${6 - game.tacticPresets.length === 1 ? "" : "s"} left.`}
             </DialogDescription>
           </DialogHeader>
-          <input
-            value={presetName}
-            onChange={(e) => setPresetName(e.target.value)}
-            placeholder={`Preset ${game.tacticPresets.length + 1}`}
-            maxLength={24}
-            aria-label="Preset name"
-            className="w-full h-10 rounded-lg border border-slate-800 bg-slate-950 px-3 text-sm text-slate-200 placeholder:text-slate-600 outline-none focus:border-emerald-500/60"
-          />
-          <div className="flex gap-2">
-            <Button variant="outline" className="flex-1 border-slate-700" onClick={() => setPresetDialog(false)}>Cancel</Button>
-            <Button className="flex-1 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold" onClick={savePreset} aria-label="Confirm save preset">
-              Save preset
-            </Button>
+          <div className="grid grid-cols-2 gap-1 rounded-lg border border-slate-800 bg-slate-950 p-1" role="group" aria-label="Save mode">
+            <button
+              type="button"
+              onClick={() => setPresetMode("new")}
+              aria-pressed={presetMode === "new"}
+              className={cn(
+                "min-h-[34px] rounded-md text-xs font-bold transition-colors",
+                presetMode === "new" ? "bg-emerald-500/15 text-emerald-400" : "text-slate-400 hover:text-slate-200",
+              )}
+            >
+              New preset
+            </button>
+            <button
+              type="button"
+              onClick={() => setPresetMode("overwrite")}
+              aria-pressed={presetMode === "overwrite"}
+              className={cn(
+                "min-h-[34px] rounded-md text-xs font-bold transition-colors",
+                presetMode === "overwrite" ? "bg-sky-500/15 text-sky-400" : "text-slate-400 hover:text-slate-200",
+              )}
+            >
+              Overwrite existing
+            </button>
           </div>
+          {presetMode === "new" ? (
+            <>
+              <input
+                value={presetName}
+                onChange={(e) => setPresetName(e.target.value)}
+                placeholder={`Preset ${game.tacticPresets.length + 1}`}
+                maxLength={24}
+                aria-label="Preset name"
+                className="w-full h-10 rounded-lg border border-slate-800 bg-slate-950 px-3 text-sm text-slate-200 placeholder:text-slate-600 outline-none focus:border-emerald-500/60"
+              />
+              {game.tacticPresets.length >= 6 && (
+                <p className="text-[10px] text-amber-400">All 6 slots are used — switch to “Overwrite existing” to replace one.</p>
+              )}
+              <div className="flex gap-2">
+                <Button variant="outline" className="flex-1 border-slate-700" onClick={() => setPresetDialog(false)}>Cancel</Button>
+                <Button
+                  className="flex-1 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold"
+                  disabled={game.tacticPresets.length >= 6}
+                  onClick={savePreset}
+                  aria-label="Confirm save as new preset"
+                >
+                  Save preset
+                </Button>
+              </div>
+            </>
+          ) : (
+            <>
+              <div
+                className="max-h-[min(40dvh,40vh)] space-y-1.5 overflow-y-auto overscroll-contain pr-1 scrollbar-thin touch-scroll"
+                role="radiogroup"
+                aria-label="Choose the preset to overwrite"
+              >
+                {game.tacticPresets.length === 0 && (
+                  <p className="text-[11px] text-slate-500 py-3 text-center">No presets yet — save a new one first.</p>
+                )}
+                {game.tacticPresets.map((preset) => {
+                  const active = overwriteTarget === preset.id;
+                  const roleCount = Object.keys(preset.roles ?? {}).length;
+                  const instrCount = Object.values(preset.instructions ?? {}).filter((i) => i.att !== "none" || i.def !== "none").length;
+                  return (
+                    <button
+                      key={preset.id}
+                      type="button"
+                      role="radio"
+                      aria-checked={active}
+                      onClick={() => setOverwriteTarget(preset.id)}
+                      className={cn(
+                        "w-full rounded-lg border p-2.5 text-left transition-colors",
+                        active ? "border-sky-500/60 bg-sky-500/10" : "border-slate-800 bg-slate-950/40 hover:border-slate-700",
+                      )}
+                      aria-label={`Overwrite ${preset.name}`}
+                    >
+                      <span className="flex items-center justify-between gap-2">
+                        <span className="text-xs font-bold text-slate-200 truncate">{preset.name}</span>
+                        {active && <Check className="h-3.5 w-3.5 shrink-0 text-sky-400" aria-hidden />}
+                      </span>
+                      <span className="block text-[10px] text-slate-500 truncate">
+                        {preset.formationName} · {preset.mentality}
+                        {roleCount > 0 && ` · ${roleCount} roles`}
+                        {instrCount > 0 && ` · ${instrCount} instructions`}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="flex gap-2">
+                <Button variant="outline" className="flex-1 border-slate-700" onClick={() => setPresetDialog(false)}>Cancel</Button>
+                <Button
+                  className="flex-1 bg-sky-500 hover:bg-sky-400 text-slate-950 font-bold"
+                  disabled={!overwriteTarget}
+                  onClick={confirmOverwrite}
+                  aria-label="Confirm overwrite selected preset"
+                >
+                  <RefreshCw className="h-4 w-4 mr-1.5" aria-hidden />
+                  Overwrite
+                </Button>
+              </div>
+              {overwriteTarget && (
+                <p className="text-[10px] text-slate-500 text-center">
+                  “{game.tacticPresets.find((p) => p.id === overwriteTarget)?.name}” will be replaced by the tactic currently on the pitch. This cannot be undone.
+                </p>
+              )}
+            </>
+          )}
         </DialogContent>
       </Dialog>
 
